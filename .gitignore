@@ -1,0 +1,6 @@
+/target/
+/.omx/
+.DS_Store
+/tests/*.pdf
+/tests/smoke-input.html
+/tests/smoke-input.md

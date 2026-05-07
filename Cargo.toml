@@ -1,0 +1,30 @@
+[package]
+name = "ironpress-php"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[lib]
+name = "ironpress_php"
+crate-type = ["cdylib"]
+
+[dependencies]
+ext-php-rs = "=0.15.12"
+ironpress_core = { package = "ironpress", version = "1.4.3", default-features = false }
+
+[features]
+default = []
+remote = ["ironpress_core/remote"]
+
+[profile.release]
+strip = "debuginfo"
+lto = "thin"
+codegen-units = 1
+
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
