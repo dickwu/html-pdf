@@ -36,7 +36,15 @@ jobs:
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update -qq
             sudo apt-get install -y -qq clang libclang-dev
-            libclang_path="$(llvm-config --libdir 2>/dev/null || find /usr/lib -path '*/llvm-*/lib' -type d | sort -V | tail -n 1)"
+            libclang_file="$(find /usr/lib -name 'libclang.so*' -print -quit)"
+            if [[ -z "$libclang_file" ]]; then
+              libclang_file="$(find /usr/lib -name 'libclang-*.so*' -print -quit)"
+            fi
+            if [[ -z "$libclang_file" ]]; then
+              echo "Unable to locate libclang shared library"
+              exit 1
+            fi
+            libclang_path="$(dirname "$libclang_file")"
           else
             brew install llvm
             libclang_path="$(brew --prefix llvm)/lib"
