@@ -172,7 +172,7 @@ jobs:
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- Formula/html-pdf.rb; then
+          if [[ -z "$(git status --porcelain -- Formula/html-pdf.rb)" ]]; then
             echo "Formula already up to date"
             exit 0
           fi
