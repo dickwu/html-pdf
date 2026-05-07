@@ -33,16 +33,49 @@ php -d extension=./target/release/libironpress_php.dylib tests/options.php
 ## Install Into Current PHP
 
 ```sh
-cargo install cargo-php --locked
+cargo install cargo-php --version 0.1.21 --locked
 cargo php install --release --yes
 php -m | grep ironpress
 ```
+
+On macOS, if `cargo-php` fails to install because the PHP symbols are unresolved during linking, install it with PHP's extension linker mode:
+
+```sh
+RUSTFLAGS='-C link-arg=-Wl,-undefined,dynamic_lookup' cargo install cargo-php --version 0.1.21 --locked
+```
+
+## Install With Homebrew
+
+```sh
+brew tap dickwu/tap
+brew install dickwu/tap/html-pdf
+php -m | grep ironpress_php
+```
+
+The Homebrew formula installs the extension for Homebrew `php@8.3` and writes:
+
+```text
+$(brew --prefix)/etc/php/8.3/conf.d/ext-ironpress_php.ini
+```
+
+Restart long-running PHP processes after installing or upgrading the formula.
 
 ## Generate Stubs
 
 ```sh
 cargo php stubs -o ironpress_php.stub.php
 ```
+
+## Release
+
+Releases are tag-driven. After bumping the version and committing the change:
+
+```sh
+git tag v0.1.0
+git push origin main v0.1.0
+```
+
+GitHub Actions verifies Linux and macOS builds, creates the GitHub release, generates the Homebrew formula from the tag tarball, and pushes it to `dickwu/homebrew-tap`. The release workflow requires the `HOMEBREW_TAP_TOKEN` repository secret.
 
 ## API
 
@@ -51,6 +84,8 @@ cargo php stubs -o ironpress_php.stub.php
 
 $pdf = ironpress_html_to_pdf('<h1>Hello</h1><p>World</p>');
 file_put_contents(__DIR__ . '/hello.pdf', $pdf);
+
+ironpress_html_to_pdf_file('<h1>Hello</h1><p>Saved directly</p>', __DIR__ . '/hello-direct.pdf');
 
 $mdPdf = ironpress_markdown_to_pdf("# Hello\n\nGenerated from **Markdown**.");
 file_put_contents(__DIR__ . '/markdown.pdf', $mdPdf);

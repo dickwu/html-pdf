@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  PHP_VERSION: "8.3"
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq clang libclang-dev
+            libclang_path="$(llvm-config --libdir 2>/dev/null || find /usr/lib -path '*/llvm-*/lib' -type d | sort -V | tail -n 1)"
+          else
+            brew install llvm
+            libclang_path="$(brew --prefix llvm)/lib"
+          fi
+          echo "LIBCLANG_PATH=${libclang_path}" >> "$GITHUB_ENV"
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+
+      - name: Configure PHP environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PHP=$(command -v php)" >> "$GITHUB_ENV"
+          echo "PHP_CONFIG=$(command -v php-config)" >> "$GITHUB_ENV"
+          php -v
+          php-config --version
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --locked --all-targets --all-features
+
+      - name: Build extension
+        run: cargo build --locked --release
+
+      - name: Run PHP smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            ext="target/release/libironpress_php.dylib"
+          else
+            ext="target/release/libironpress_php.so"
+          fi
+          php -n -d extension="$ext" tests/smoke.php
+          php -n -d extension="$ext" tests/options.php
+
+      - name: Verify generated PHP stubs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            RUSTFLAGS="-C link-arg=-Wl,-undefined,dynamic_lookup" cargo install cargo-php --version 0.1.21 --locked
+          else
+            cargo install cargo-php --version 0.1.21 --locked
+          fi
+          cargo php stubs -o /tmp/ironpress_php.stub.php
+          diff -u ironpress_php.stub.php /tmp/ironpress_php.stub.php

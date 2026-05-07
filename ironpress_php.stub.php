@@ -121,6 +121,15 @@ namespace {
     function ironpress_html_to_pdf(string $html): string {}
 
     /**
+     * Convert HTML to PDF and save it to a file.
+     *
+     * @param string $html
+     * @param string $output
+     * @return void
+     */
+    function ironpress_html_to_pdf_file(string $html, string $output): void {}
+
+    /**
      * Convert Markdown to PDF bytes.
      *
      * @param string $markdown

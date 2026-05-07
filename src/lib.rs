@@ -1,7 +1,7 @@
 #![cfg_attr(windows, feature(abi_vectorcall))]
 #![allow(clippy::missing_errors_doc, clippy::must_use_candidate)]
 
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use ext_php_rs::{binary::Binary, prelude::*};
 use ironpress_core::{HtmlConverter as CoreHtmlConverter, Margin, PageSize};
@@ -61,6 +61,16 @@ pub fn html_to_pdf(html: &str) -> PhpResult<PdfBinary> {
     ironpress_core::html_to_pdf(html)
         .map(pdf_to_php_bytes)
         .map_err(map_ironpress_err)
+}
+
+/// Convert HTML to PDF and save it to a file.
+#[php_function]
+#[php(name = "ironpress_html_to_pdf_file")]
+pub fn html_to_pdf_file(html: &str, output: &str) -> PhpResult<()> {
+    let pdf = ironpress_core::html_to_pdf(html).map_err(map_ironpress_err)?;
+
+    fs::write(output, pdf)
+        .map_err(|err| php_err(format!("Failed to write PDF to '{output}': {err}")))
 }
 
 /// Convert Markdown to PDF bytes.
@@ -244,6 +254,7 @@ pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
         .name("ironpress_php")
         .version(env!("CARGO_PKG_VERSION"))
         .function(wrap_function!(html_to_pdf))
+        .function(wrap_function!(html_to_pdf_file))
         .function(wrap_function!(markdown_to_pdf))
         .function(wrap_function!(convert_file))
         .function(wrap_function!(convert_markdown_file))

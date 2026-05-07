@@ -1,0 +1,168 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  PHP_VERSION: "8.3"
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Install native dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq clang libclang-dev
+            libclang_path="$(llvm-config --libdir 2>/dev/null || find /usr/lib -path '*/llvm-*/lib' -type d | sort -V | tail -n 1)"
+          else
+            brew install llvm
+            libclang_path="$(brew --prefix llvm)/lib"
+          fi
+          echo "LIBCLANG_PATH=${libclang_path}" >> "$GITHUB_ENV"
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+
+      - name: Configure PHP environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PHP=$(command -v php)" >> "$GITHUB_ENV"
+          echo "PHP_CONFIG=$(command -v php-config)" >> "$GITHUB_ENV"
+          php -v
+          php-config --version
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --locked --all-targets --all-features
+
+      - name: Build extension
+        run: cargo build --locked --release
+
+      - name: Run PHP smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            ext="target/release/libironpress_php.dylib"
+          else
+            ext="target/release/libironpress_php.so"
+          fi
+          php -n -d extension="$ext" tests/smoke.php
+          php -n -d extension="$ext" tests/options.php
+
+  github-release:
+    name: Create GitHub release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists"
+          else
+            gh release create "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --title "$TAG_NAME" --generate-notes --verify-tag
+          fi
+
+  homebrew:
+    name: Update Homebrew tap
+    needs: github-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Generate formula
+        env:
+          TAG_NAME: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          version="${TAG_NAME#v}"
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG_NAME}.tar.gz"
+          curl -fsSL "$url" -o source.tar.gz
+          sha256="$(sha256sum source.tar.gz | awk '{print $1}')"
+          VERSION="$version" URL="$url" SHA256="$sha256" scripts/generate-homebrew-formula.sh > html-pdf.rb
+          ruby -c html-pdf.rb
+
+      - name: Push formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG_NAME: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "HOMEBREW_TAP_TOKEN is required to update dickwu/homebrew-tap"
+            exit 1
+          fi
+
+          gh repo clone dickwu/homebrew-tap tap
+          mkdir -p tap/Formula
+          cp html-pdf.rb tap/Formula/html-pdf.rb
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Formula/html-pdf.rb; then
+            echo "Formula already up to date"
+            exit 0
+          fi
+
+          git add Formula/html-pdf.rb
+          git commit -m "Update html-pdf formula for ${TAG_NAME}"
+          git push

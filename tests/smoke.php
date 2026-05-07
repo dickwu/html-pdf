@@ -12,6 +12,11 @@ require_true(is_string($htmlPdf), 'HTML conversion should return a string');
 require_true(str_starts_with($htmlPdf, '%PDF'), 'HTML conversion should return PDF bytes');
 file_put_contents(__DIR__ . '/smoke-html.pdf', $htmlPdf);
 
+$directOutput = __DIR__ . '/smoke-direct-html.pdf';
+ironpress_html_to_pdf_file('<h1>Direct HTML</h1><p>Saved directly.</p>', $directOutput);
+require_true(is_file($directOutput), 'direct HTML conversion should create output file');
+require_true(str_starts_with(file_get_contents($directOutput), '%PDF'), 'direct HTML output should be PDF bytes');
+
 $markdownPdf = ironpress_markdown_to_pdf("# Hello\n\nWorld");
 require_true(is_string($markdownPdf), 'Markdown conversion should return a string');
 require_true(str_starts_with($markdownPdf, '%PDF'), 'Markdown conversion should return PDF bytes');
