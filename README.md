@@ -75,7 +75,7 @@ git tag v0.1.0
 git push origin main v0.1.0
 ```
 
-GitHub Actions verifies Linux and macOS builds, creates the GitHub release, generates the Homebrew formula from the tag tarball, and pushes it to `dickwu/homebrew-tap`. The release workflow requires the `HOMEBREW_TAP_TOKEN` repository secret.
+GitHub Actions verifies Linux and macOS builds, creates the GitHub release, generates the Homebrew formula from the tag tarball, and pushes it to `dickwu/homebrew-tap`. The release workflow requires the `HOMEBREW_TAP_DEPLOY_KEY` repository secret, which is the private half of a read-write deploy key installed on `dickwu/homebrew-tap`.
 
 ## API
 
