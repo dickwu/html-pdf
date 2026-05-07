@@ -150,16 +150,22 @@ jobs:
 
       - name: Push formula
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
           TAG_NAME: ${{ env.RELEASE_TAG }}
         run: |
           set -euo pipefail
-          if [[ -z "${GH_TOKEN}" ]]; then
-            echo "HOMEBREW_TAP_TOKEN is required to update dickwu/homebrew-tap"
+          if [[ -z "${HOMEBREW_TAP_DEPLOY_KEY}" ]]; then
+            echo "HOMEBREW_TAP_DEPLOY_KEY is required to update dickwu/homebrew-tap"
             exit 1
           fi
 
-          gh repo clone dickwu/homebrew-tap tap
+          mkdir -p ~/.ssh
+          printf '%s\n' "${HOMEBREW_TAP_DEPLOY_KEY}" > ~/.ssh/homebrew_tap_deploy_key
+          chmod 600 ~/.ssh/homebrew_tap_deploy_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/homebrew_tap_deploy_key -o IdentitiesOnly=yes"
+          git clone git@github.com:dickwu/homebrew-tap.git tap
           mkdir -p tap/Formula
           cp html-pdf.rb tap/Formula/html-pdf.rb
 
