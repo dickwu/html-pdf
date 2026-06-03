@@ -957,8 +957,7 @@ dependencies = [
 [[package]]
 name = "ironpress"
 version = "1.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22d0de31cc9c82636f4440263bb29e83ce3e58b142bb722038c9711025c4653e"
+source = "git+https://github.com/dickwu/ironpress.git?branch=fix%2Ftable-cell-image-svg#cfae56ca34227c869d6aa18d828e7d1d057fd11d"
 dependencies = [
  "flate2",
  "fontdb",
@@ -978,7 +977,7 @@ dependencies = [
 
 [[package]]
 name = "ironpress-php"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ext-php-rs",
  "ironpress",
