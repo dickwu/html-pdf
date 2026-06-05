@@ -957,7 +957,7 @@ dependencies = [
 [[package]]
 name = "ironpress"
 version = "1.4.3"
-source = "git+https://github.com/dickwu/ironpress.git?branch=fix%2Ftable-cell-image-svg#a0db4f34e441b8365493adaeaeca1a50c2ec882f"
+source = "git+https://github.com/dickwu/ironpress.git?branch=main#ba3cb76eb655588fe472710e13f938f78d43df18"
 dependencies = [
  "flate2",
  "fontdb",

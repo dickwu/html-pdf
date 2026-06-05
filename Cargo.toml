@@ -12,9 +12,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ext-php-rs = "=0.15.12"
-# GFI-287: depend on the fork carrying the table-cell SVG/img render fix until it lands
-# upstream / on crates.io. Cargo.lock pins the exact commit for reproducible prod builds.
-ironpress_core = { package = "ironpress", git = "https://github.com/dickwu/ironpress.git", branch = "fix/table-cell-image-svg", default-features = false }
+# Ironpress core (HTML/CSS/Markdown -> PDF engine). Cargo.lock pins the exact
+# commit for reproducible prod builds.
+ironpress_core = { package = "ironpress", git = "https://github.com/dickwu/ironpress.git", branch = "main", default-features = false }
 
 [features]
 default = []
