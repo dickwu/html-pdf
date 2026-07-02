@@ -80,6 +80,20 @@ namespace Ironpress {
         public function margins(float $top, float $right, float $bottom, float $left): void {}
 
         /**
+         * Top y-positions (points, page-content coordinates) of every sentinel
+         * element — an empty block matching the given height (pt) and solid
+         * background color (#RRGGBB). Distances between consecutive tops minus
+         * the sentinel height are exact block flow heights. The document must
+         * fit one page (declare a tall @page size).
+         *
+         * @param string $html
+         * @param float $sentinel_height
+         * @param string $sentinel_color
+         * @return float[]
+         */
+        public function measureSentinelTops(string $html, float $sentinel_height, string $sentinel_color): array {}
+
+        /**
          * @param string $name
          * @return void
          */

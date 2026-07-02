@@ -957,7 +957,7 @@ dependencies = [
 [[package]]
 name = "ironpress"
 version = "1.4.3"
-source = "git+https://github.com/dickwu/ironpress.git?branch=main#7ecc2a5307581c1e3e3b4cb544d690ce9994f4e0"
+source = "git+https://github.com/dickwu/ironpress.git?branch=main#3e86fabf45b6c53a2d08911943086af39a3543a1"
 dependencies = [
  "flate2",
  "fontdb",
@@ -977,7 +977,7 @@ dependencies = [
 
 [[package]]
 name = "ironpress-php"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "ext-php-rs",
  "ironpress",

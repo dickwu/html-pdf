@@ -43,6 +43,21 @@ fn validate_margin_points(name: &str, value: f64) -> PhpResult<f32> {
     Ok(value as f32)
 }
 
+fn parse_hex_color(hex: &str) -> PhpResult<(u8, u8, u8)> {
+    let digits = hex.trim().trim_start_matches('#');
+    if digits.len() != 6 || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(php_err("sentinel color must be #RRGGBB"));
+    }
+    let value = u32::from_str_radix(digits, 16).map_err(|err| php_err(err.to_string()))?;
+
+    #[allow(clippy::cast_possible_truncation)]
+    Ok((
+        ((value >> 16) & 0xFF) as u8,
+        ((value >> 8) & 0xFF) as u8,
+        (value & 0xFF) as u8,
+    ))
+}
+
 fn page_size_by_name(name: &str) -> PhpResult<PageSize> {
     match name.trim().to_ascii_lowercase().as_str() {
         "a4" => Ok(PageSize::A4),
@@ -212,6 +227,31 @@ impl HtmlConverter {
         self.build_converter()
             .convert_markdown(markdown)
             .map(pdf_to_php_bytes)
+            .map_err(map_ironpress_err)
+    }
+
+    /// Lay out `html` (without rendering a PDF) and return the top y-position,
+    /// in points from the top of the page content box, of every "sentinel"
+    /// element — an empty block whose fixed `height` (pt) and solid
+    /// `background-color` (#RRGGBB) both match the given signature.
+    ///
+    /// Interleave sentinel divs between blocks to measure them: the distance
+    /// between consecutive sentinel tops minus the sentinel height is the
+    /// block's exact flow height (content + vertical margins), using the same
+    /// fonts, CSS and wrapping as convert(). The whole document must fit one
+    /// page (declare e.g. `@page { size: 612pt 14000pt; }`) or this throws.
+    pub fn measure_sentinel_tops(
+        &self,
+        html: &str,
+        sentinel_height: f64,
+        sentinel_color: &str,
+    ) -> PhpResult<Vec<f64>> {
+        let height = validate_positive_points("sentinel_height", sentinel_height)?;
+        let color = parse_hex_color(sentinel_color)?;
+
+        self.build_converter()
+            .measure_sentinel_tops(html, height, color)
+            .map(|tops| tops.into_iter().map(f64::from).collect())
             .map_err(map_ironpress_err)
     }
 }
