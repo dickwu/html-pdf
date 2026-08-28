@@ -238,7 +238,7 @@ impl HtmlConverter {
     /// Interleave sentinel divs between blocks to measure them: the distance
     /// between consecutive sentinel tops minus the sentinel height is the
     /// block's exact flow height (content + vertical margins), using the same
-    /// fonts, CSS and wrapping as convert(). The whole document must fit one
+    /// fonts, CSS and wrapping as `convert()`. The whole document must fit one
     /// page (declare e.g. `@page { size: 612pt 14000pt; }`) or this throws.
     pub fn measure_sentinel_tops(
         &self,
