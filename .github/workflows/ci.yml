@@ -29,6 +29,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.2
 
+      - name: Run Homebrew formula generator tests
+        run: ruby tests/homebrew_formula_test.rb
+
       - name: Install native dependencies
         shell: bash
         run: |

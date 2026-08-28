@@ -52,13 +52,13 @@ brew install dickwu/tap/html-pdf
 php -m | grep ironpress_php
 ```
 
-The Homebrew formula installs the extension for Homebrew `php@8.3` and writes:
+The Homebrew formula detects installed Homebrew PHP formulae at install or upgrade time, builds a matching extension for each PHP minor version, and writes:
 
 ```text
-$(brew --prefix)/etc/php/8.3/conf.d/ext-ironpress_php.ini
+$(brew --prefix)/etc/php/<php-minor>/conf.d/ext-ironpress_php.ini
 ```
 
-Restart long-running PHP processes after installing or upgrading the formula.
+Reinstall `html-pdf` after installing another Homebrew PHP version. Restart long-running PHP processes after installing or upgrading the formula.
 
 ## Generate Stubs
 
