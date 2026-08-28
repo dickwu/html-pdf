@@ -80,16 +80,21 @@ namespace Ironpress {
         public function margins(float $top, float $right, float $bottom, float $left): void {}
 
         /**
-         * Top y-positions (points, page-content coordinates) of every sentinel
-         * element — an empty block matching the given height (pt) and solid
-         * background color (#RRGGBB). Distances between consecutive tops minus
-         * the sentinel height are exact block flow heights. The document must
-         * fit one page (declare a tall @page size).
+         * Lay out `html` (without rendering a PDF) and return the top y-position,
+         * in points from the top of the page content box, of every "sentinel"
+         * element — an empty block whose fixed `height` (pt) and solid
+         * `background-color` (#RRGGBB) both match the given signature.
+         *
+         * Interleave sentinel divs between blocks to measure them: the distance
+         * between consecutive sentinel tops minus the sentinel height is the
+         * block's exact flow height (content + vertical margins), using the same
+         * fonts, CSS and wrapping as `convert()`. The whole document must fit one
+         * page (declare e.g. `@page { size: 612pt 14000pt; }`) or this throws.
          *
          * @param string $html
          * @param float $sentinel_height
          * @param string $sentinel_color
-         * @return float[]
+         * @return array
          */
         public function measureSentinelTops(string $html, float $sentinel_height, string $sentinel_color): array {}
 
