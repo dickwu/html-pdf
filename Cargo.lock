@@ -1100,7 +1100,7 @@ dependencies = [
 [[package]]
 name = "ironpress"
 version = "1.6.0"
-source = "git+https://github.com/dickwu/ironpress.git?branch=feat%2Fport-unique-work-1.6.0#789dbb40281d14858fc4155bdc565117f8096e53"
+source = "git+https://github.com/dickwu/ironpress.git?branch=feat%2Fport-unique-work-1.6.0#5a48f89f53f59704ba9c19178ddb8698e800e394"
 dependencies = [
  "bogon",
  "core-net",
