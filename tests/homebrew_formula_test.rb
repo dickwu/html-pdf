@@ -38,6 +38,19 @@ class HomebrewFormulaTest < Minitest::Test
     refute_includes formula, "etc/\"php/8.3/conf.d\""
   end
 
+  def test_formula_clears_stale_ini_files_before_writing_config
+    assert_includes formula, "rm Dir[\"\#{config_dir}/*ironpress_php*.ini\"]"
+
+    removal = formula.index("rm Dir[")
+    write = formula.index("config_file.write")
+
+    refute_nil removal, "formula must remove stale ini files"
+    refute_nil write, "formula must write the conf.d ini"
+    assert_operator removal, :<, write,
+                    "Homebrew's Pathname#write raises on an existing file, so stale " \
+                    "ini files must be removed before the write"
+  end
+
   def test_formula_smoke_tests_every_installed_php_extension
     assert_includes formula, "installed_homebrew_php_formulae.each do |php|"
     assert_includes formula, "homebrew-\#{php_version}.pdf"

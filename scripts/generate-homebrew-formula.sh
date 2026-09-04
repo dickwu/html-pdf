@@ -44,7 +44,15 @@ class HtmlPdf < Formula
 
       config_dir = etc/"php/#{php_version}/conf.d"
       config_dir.mkpath
-      (config_dir/"ext-ironpress_php.ini").write <<~INI
+
+      # Files under etc survive uninstall and upgrade, and Homebrew's
+      # Pathname#write raises "Will not overwrite" on an existing file. Drop the
+      # ini files any earlier version of this formula left behind so reinstalls
+      # stay idempotent and no stale extension path lingers in conf.d.
+      rm Dir["#{config_dir}/*ironpress_php*.ini"]
+
+      config_file = config_dir/"ext-ironpress_php.ini"
+      config_file.write <<~INI
         extension=#{opt_lib}/php/#{php_version}/extensions/ironpress_php.so
       INI
     end
