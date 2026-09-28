@@ -34,7 +34,10 @@ require_true($stamper->pendingOps() === 4, 'four operations queued');
 $filled = $stamper->toPdf();
 require_true(is_string($filled) && str_starts_with($filled, '%PDF'), 'toPdf should return PDF bytes');
 require_true($filled === $stamper->toPdf(), 'toPdf must be repeatable');
-require_true(strlen($filled) > strlen($template), 'overlay adds content');
+// lopdf re-serializes the document (and compresses streams the template left
+// plain), so the size can shrink; the overlay's font resource is the proof.
+require_true(str_contains($filled, '/IPStampH') && str_contains($filled, '/IPStampHB'), 'overlay registers its fonts');
+require_true(!str_contains($template, '/IPStampH'), 'template has no stamp fonts');
 file_put_contents(__DIR__ . '/stamper-filled.pdf', $filled);
 
 $reloaded = new Ironpress\PdfStamper($filled);
