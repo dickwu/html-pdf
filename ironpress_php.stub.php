@@ -105,6 +105,92 @@ namespace Ironpress {
          */
         public function sanitize(bool $enabled): void {}
     }
+
+    /**
+     * Overlay text and tick marks onto the pages of an existing PDF (for example a
+     * government form) without altering the original page content. Exposed as
+     * Ironpress\PdfStamper.
+     *
+     * Coordinates are PDF points with y measured from the TOP edge of the page:
+     * `text()` takes the baseline, `check()` the top-left corner of the box.
+     * Text uses the built-in Helvetica / Helvetica-Bold (`WinAnsi`); characters
+     * outside that repertoire raise an exception instead of printing a `?`.
+     */
+    class PdfStamper {
+        /**
+         * @param string $pdf
+         */
+        public function __construct(string $pdf) {}
+
+        /**
+         * Queue a vector tick inside a `size`-pt box whose top-left corner is
+         * (`x`, `y_top`); `stroke` is the line width (default 1.5 pt).
+         *
+         * @param int $page
+         * @param float $x
+         * @param float $y_top
+         * @param float $size
+         * @param float|null $stroke
+         * @return void
+         */
+        public function check(int $page, float $x, float $y_top, float $size, ?float $stroke = null): void {}
+
+        /**
+         * Number of pages in the loaded PDF.
+         *
+         * @return int
+         */
+        public function pageCount(): int {}
+
+        /**
+         * `[width, height]` of a 1-based page in points (its `MediaBox`).
+         *
+         * @param int $page
+         * @return array
+         */
+        public function pageSize(int $page): array {}
+
+        /**
+         * Number of queued operations.
+         *
+         * @return int
+         */
+        public function pendingOps(): int {}
+
+        /**
+         * Drop every queued operation; the loaded PDF stays.
+         *
+         * @return void
+         */
+        public function reset(): void {}
+
+        /**
+         * Queue a single-line text at baseline (`x`, `y_top`) on a 1-based page.
+         * `size` defaults to 9 pt, `font` to Helvetica (or Helvetica-Bold),
+         * `align` to left (or center / right, anchored on `x`), and `max_width`
+         * shrinks the font down to 5 pt so the text fits, else throws.
+         *
+         * @param int $page
+         * @param float $x
+         * @param float $y_top
+         * @param string $text
+         * @param float|null $size
+         * @param string|null $font
+         * @param string|null $align
+         * @param float|null $max_width
+         * @return void
+         */
+        public function text(int $page, float $x, float $y_top, string $text, ?float $size = null, ?string $font = null, ?string $align = null, ?float $max_width = null): void {}
+
+        /**
+         * The original PDF with every queued operation drawn on top. The loaded
+         * PDF and the queue are left untouched, so the same template can be
+         * filled again after `reset()`.
+         *
+         * @return string
+         */
+        public function toPdf(): string {}
+    }
 }
 
 namespace {

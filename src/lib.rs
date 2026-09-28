@@ -6,6 +6,11 @@ use std::{fs, path::PathBuf};
 use ext_php_rs::{binary::Binary, prelude::*};
 use ironpress_core::{HtmlConverter as CoreHtmlConverter, Margin, PageSize};
 
+mod base14;
+mod stamper;
+
+use stamper::{Align, CheckOp, Font, Stamper, TextOp};
+
 type PdfBinary = Binary<u8>;
 
 fn pdf_to_php_bytes(pdf: Vec<u8>) -> PdfBinary {
@@ -288,6 +293,118 @@ impl HtmlConverter {
     }
 }
 
+/// Overlay text and tick marks onto the pages of an existing PDF (for example a
+/// government form) without altering the original page content. Exposed as
+/// Ironpress\PdfStamper.
+///
+/// Coordinates are PDF points with y measured from the TOP edge of the page:
+/// `text()` takes the baseline, `check()` the top-left corner of the box.
+/// Text uses the built-in Helvetica / Helvetica-Bold (`WinAnsi`); characters
+/// outside that repertoire raise an exception instead of printing a `?`.
+#[php_class]
+#[php(name = "Ironpress\\PdfStamper")]
+#[derive(Debug, Clone)]
+pub struct PdfStamper {
+    inner: Stamper,
+}
+
+#[php_impl]
+impl PdfStamper {
+    pub fn __construct(pdf: Binary<u8>) -> PhpResult<Self> {
+        let bytes = Vec::from(pdf);
+        if bytes.len() > 100 * 1024 * 1024 {
+            return Err(php_err("PDF data exceeds 100 MB limit"));
+        }
+        Stamper::load(&bytes)
+            .map(|inner| Self { inner })
+            .map_err(php_err)
+    }
+
+    /// Number of pages in the loaded PDF.
+    pub fn page_count(&self) -> i64 {
+        i64::try_from(self.inner.page_count()).unwrap_or(i64::MAX)
+    }
+
+    /// `[width, height]` of a 1-based page in points (its `MediaBox`).
+    pub fn page_size(&self, page: i64) -> PhpResult<Vec<f64>> {
+        let (width, height) = self.inner.page_size(page_number(page)?).map_err(php_err)?;
+        Ok(vec![width, height])
+    }
+
+    /// Queue a single-line text at baseline (`x`, `y_top`) on a 1-based page.
+    /// `size` defaults to 9 pt, `font` to Helvetica (or Helvetica-Bold),
+    /// `align` to left (or center / right, anchored on `x`), and `max_width`
+    /// shrinks the font down to 5 pt so the text fits, else throws.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text(
+        &mut self,
+        page: i64,
+        x: f64,
+        y_top: f64,
+        text: &str,
+        size: Option<f64>,
+        font: Option<&str>,
+        align: Option<&str>,
+        max_width: Option<f64>,
+    ) -> PhpResult<()> {
+        let op = TextOp {
+            page: page_number(page)?,
+            x,
+            y_top,
+            text: text.to_string(),
+            size: size.unwrap_or(9.0),
+            font: Font::parse(font.unwrap_or("")).map_err(php_err)?,
+            align: Align::parse(align.unwrap_or("")).map_err(php_err)?,
+            max_width,
+        };
+        self.inner.text(op).map_err(php_err)
+    }
+
+    /// Queue a vector tick inside a `size`-pt box whose top-left corner is
+    /// (`x`, `y_top`); `stroke` is the line width (default 1.5 pt).
+    pub fn check(
+        &mut self,
+        page: i64,
+        x: f64,
+        y_top: f64,
+        size: f64,
+        stroke: Option<f64>,
+    ) -> PhpResult<()> {
+        let op = CheckOp {
+            page: page_number(page)?,
+            x,
+            y_top,
+            size,
+            stroke: stroke.unwrap_or(1.5),
+        };
+        self.inner.check(op).map_err(php_err)
+    }
+
+    /// Drop every queued operation; the loaded PDF stays.
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    /// Number of queued operations.
+    pub fn pending_ops(&self) -> i64 {
+        i64::try_from(self.inner.pending_ops()).unwrap_or(i64::MAX)
+    }
+
+    /// The original PDF with every queued operation drawn on top. The loaded
+    /// PDF and the queue are left untouched, so the same template can be
+    /// filled again after `reset()`.
+    pub fn to_pdf(&self) -> PhpResult<PdfBinary> {
+        self.inner.to_pdf().map(pdf_to_php_bytes).map_err(php_err)
+    }
+}
+
+fn page_number(page: i64) -> PhpResult<u32> {
+    u32::try_from(page)
+        .ok()
+        .filter(|&page| page >= 1)
+        .ok_or_else(|| php_err(format!("page must be a positive integer, got {page}")))
+}
+
 #[php_module]
 pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
     module
@@ -300,4 +417,5 @@ pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
         .function(wrap_function!(convert_markdown_file))
         .function(wrap_function!(version))
         .class::<HtmlConverter>()
+        .class::<PdfStamper>()
 }

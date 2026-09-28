@@ -104,6 +104,31 @@ $converter->addFont('Inter', file_get_contents(__DIR__ . '/fonts/Inter.ttf'));
 $pdf = $converter->convert('<p style="font-family: Inter">Custom font text</p>');
 ```
 
+### Stamping an existing PDF
+
+`Ironpress\PdfStamper` writes text and tick marks on top of the pages of an
+existing PDF (a government form, a signed template) without altering the
+original page content. Coordinates are PDF points with `y` measured from the
+top edge of the page: `text()` takes the baseline, `check()` the top-left
+corner of the box. Text uses the built-in Helvetica / Helvetica-Bold with
+WinAnsi encoding; characters outside that repertoire throw instead of printing
+a `?`.
+
+```php
+$stamper = new Ironpress\PdfStamper(file_get_contents('form.pdf'));
+$stamper->pageCount();                       // 3
+$stamper->pageSize(1);                       // [612.0, 792.0]
+$stamper->text(1, 59.0, 230.8, 'Doe');       // page, x, baseline-from-top, text
+$stamper->text(1, 127.0, 655.0, '2026-10-05', 9.0, 'Helvetica', 'center');
+$stamper->text(1, 343.0, 241.6, $providerLine, 9.0, 'Helvetica-Bold', 'left', 216.0); // shrinks to fit 216 pt
+$stamper->check(1, 56.2, 146.2, 10.8);       // tick inside the 10.8 pt box at (x, y-top)
+file_put_contents('filled.pdf', $stamper->toPdf());
+$stamper->reset();                           // reuse the template for the next client
+```
+
+`toPdf()` leaves the template and the queued operations untouched, so one
+loaded template can be filled many times.
+
 ## Security Defaults
 
 HTML sanitization is enabled by default. Call `sanitize(false)` only when the input is trusted.
