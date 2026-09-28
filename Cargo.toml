@@ -1,6 +1,6 @@
 [package]
 name = "ironpress-php"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -15,6 +15,7 @@ ext-php-rs = "=0.15.12"
 # Ironpress core (HTML/CSS/Markdown -> PDF engine). Cargo.lock pins the exact
 # commit for reproducible prod builds.
 ironpress_core = { package = "ironpress", git = "https://github.com/dickwu/ironpress.git", branch = "feat/port-unique-work-1.6.0-sentinel", default-features = false }
+lopdf = "0.45"
 
 [features]
 default = []
