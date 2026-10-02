@@ -104,6 +104,7 @@ jobs:
           fi
           php -n -d extension="$ext" tests/smoke.php
           php -n -d extension="$ext" tests/options.php
+          php -n -d extension="$ext" tests/stamper.php
 
   github-release:
     name: Create GitHub release

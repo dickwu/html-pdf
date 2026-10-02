@@ -57,4 +57,25 @@ require_throws(fn () => $stamper->text(1, 1.0, 1.0, 'x', 9.0, null, 'justify'), 
 require_throws(fn () => $stamper->check(1, 1.0, 1.0, 0.0), 'positive', 'check size is validated');
 require_true($stamper->pendingOps() === 0, 'rejected operations are not queued');
 
+// An added TrueType font (Mrs Saint Delafield, SIL OFL) for a signature line.
+$script = file_get_contents(__DIR__ . '/fixtures/MrsSaintDelafield-Regular.ttf');
+$signed = new Ironpress\PdfStamper($template);
+$signed->addFont('Signature', $script);
+$signed->text(1, 40.0, 200.0, 'Jane Doe', 18.0, 'signature');
+$signed->text(1, 300.0, 200.0, '2026-10-02', 9.0, null, 'right');
+$signedPdf = $signed->toPdf();
+require_true(str_contains($signedPdf, '/IPStampT1') && str_contains($signedPdf, '/FontFile2') && str_contains($signedPdf, '/MrsSaintDelafield-Regular'), 'the added font is embedded');
+require_true(str_contains($signedPdf, '/IPStampH'), 'built-in fonts still work alongside');
+file_put_contents(__DIR__ . '/stamper-signed.pdf', $signedPdf);
+$signed->reset();
+$signed->text(1, 40.0, 220.0, 'Again', 18.0, 'Signature');
+require_true($signed->pendingOps() === 1, 'added fonts survive reset()');
+
+require_throws(fn () => $signed->addFont('', $script), 'must not be empty', 'font names are required');
+require_throws(fn () => $signed->addFont('Other', ''), 'must not be empty', 'font data is required');
+require_throws(fn () => $signed->addFont('signature', $script), 'already added', 'a name is added once');
+require_throws(fn () => $signed->addFont('Helvetica', $script), 'built-in', 'built-in names are reserved');
+require_throws(fn () => $signed->addFont('Broken', 'not a font'), 'cannot parse font', 'garbage fonts are rejected');
+require_throws(fn () => $signed->text(1, 1.0, 1.0, "\u{1403}", 9.0, 'Signature'), 'U+1403', 'added fonts are still WinAnsi');
+
 echo "stamper smoke ok\n";
