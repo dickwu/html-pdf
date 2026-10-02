@@ -1309,6 +1309,7 @@ dependencies = [
  "ext-php-rs",
  "ironpress",
  "lopdf",
+ "ttf-parser",
 ]
 
 [[package]]

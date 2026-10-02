@@ -110,9 +110,10 @@ $pdf = $converter->convert('<p style="font-family: Inter">Custom font text</p>')
 existing PDF (a government form, a signed template) without altering the
 original page content. Coordinates are PDF points with `y` measured from the
 top edge of the page: `text()` takes the baseline, `check()` the top-left
-corner of the box. Text uses the built-in Helvetica / Helvetica-Bold with
-WinAnsi encoding; characters outside that repertoire throw instead of printing
-a `?`.
+corner of the box. Text uses the built-in Helvetica / Helvetica-Bold, or a
+TrueType font added with `addFont()`, always with WinAnsi encoding; characters
+outside that repertoire, or missing from an added font, throw instead of
+printing a `?`.
 
 ```php
 $stamper = new Ironpress\PdfStamper(file_get_contents('form.pdf'));
@@ -122,12 +123,17 @@ $stamper->text(1, 59.0, 230.8, 'Doe');       // page, x, baseline-from-top, text
 $stamper->text(1, 127.0, 655.0, '2026-10-05', 9.0, 'Helvetica', 'center');
 $stamper->text(1, 343.0, 241.6, $providerLine, 9.0, 'Helvetica-Bold', 'left', 216.0); // shrinks to fit 216 pt
 $stamper->check(1, 56.2, 146.2, 10.8);       // tick inside the 10.8 pt box at (x, y-top)
+$stamper->addFont('Signature', file_get_contents('Allura-Regular.ttf')); // a .ttf, embedded whole
+$stamper->text(1, 236.9, 463.1, 'Jane Doe', 16.0, 'Signature');
 file_put_contents('filled.pdf', $stamper->toPdf());
 $stamper->reset();                           // reuse the template for the next client
 ```
 
 `toPdf()` leaves the template and the queued operations untouched, so one
-loaded template can be filled many times.
+loaded template can be filled many times. Added fonts stay through `reset()`
+and are embedded once per PDF, only when a text uses them. Only TrueType
+outlines (`glyf`) are supported; `.otf` (CFF) fonts, font collections and
+fonts whose licence forbids embedding (OS/2 `fsType` restricted) are refused.
 
 ## Security Defaults
 

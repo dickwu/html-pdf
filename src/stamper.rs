@@ -5,16 +5,22 @@ use std::collections::BTreeMap;
 
 use lopdf::content::{Content, Operation};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, StringFormat};
+use ttf_parser::{Face, Permissions, PlatformId};
 
 use crate::base14::{HELVETICA, HELVETICA_BOLD};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Font {
     Helvetica,
     HelveticaBold,
+    /// A TrueType font added with [`Stamper::add_font`], by the order it was
+    /// added in.
+    Embedded(usize),
 }
 
 impl Font {
+    /// A built-in font by name. Fonts added with [`Stamper::add_font`] are
+    /// looked up with [`Stamper::font`].
     pub fn parse(name: &str) -> Result<Self, String> {
         match name
             .trim()
@@ -25,32 +31,215 @@ impl Font {
             "" | "helvetica" => Ok(Self::Helvetica),
             "helvetica-bold" | "bold" => Ok(Self::HelveticaBold),
             other => Err(format!(
-                "unknown font '{other}': use Helvetica or Helvetica-Bold"
+                "unknown font '{other}': use Helvetica, Helvetica-Bold or a font added with addFont()"
             )),
         }
     }
 
-    fn base_font(self) -> &'static str {
+    /// `/BaseFont` of a built-in font; `None` for an added one.
+    fn base14(self) -> Option<&'static str> {
         match self {
-            Self::Helvetica => "Helvetica",
-            Self::HelveticaBold => "Helvetica-Bold",
+            Self::Helvetica => Some("Helvetica"),
+            Self::HelveticaBold => Some("Helvetica-Bold"),
+            Self::Embedded(_) => None,
         }
     }
 
     /// Resource name used inside the page's /Font dictionary.
-    fn resource_name(self) -> &'static str {
+    fn resource_name(self) -> String {
         match self {
-            Self::Helvetica => "IPStampH",
-            Self::HelveticaBold => "IPStampHB",
+            Self::Helvetica => "IPStampH".to_string(),
+            Self::HelveticaBold => "IPStampHB".to_string(),
+            Self::Embedded(index) => format!("IPStampT{}", index + 1),
         }
+    }
+}
+
+/// A TrueType font added with [`Stamper::add_font`]. The whole file is
+/// embedded (no subsetting) as a simple font with `WinAnsiEncoding`, so text
+/// set in it is encoded exactly like text in the built-in fonts.
+#[derive(Debug, Clone)]
+struct EmbeddedFont {
+    /// The name `text()` refers to it by.
+    name: String,
+    /// The font's `PostScript` name, written as `/BaseFont`.
+    base_font: String,
+    /// Advance widths (1/1000 em) by `WinAnsiEncoding` byte, 0 where the font
+    /// has no glyph.
+    widths: [u16; 256],
+    /// Whether the font has a glyph for each `WinAnsiEncoding` byte.
+    covered: [bool; 256],
+    flags: i64,
+    bbox: [i64; 4],
+    italic_angle: f32,
+    ascent: i64,
+    descent: i64,
+    cap_height: i64,
+    data: Vec<u8>,
+}
+
+impl EmbeddedFont {
+    /// `index` is the font's place among the added fonts; it names a font
+    /// that has no `PostScript` name of its own.
+    fn parse(name: &str, data: Vec<u8>, index: usize) -> Result<Self, String> {
+        if data.starts_with(b"ttcf") {
+            return Err(format!(
+                "font '{name}' is a font collection (.ttc): add a single .ttf"
+            ));
+        }
+        let face =
+            Face::parse(&data, 0).map_err(|err| format!("cannot parse font '{name}': {err}"))?;
+        if face.tables().glyf.is_none() {
+            return Err(format!(
+                "font '{name}' has no TrueType outlines: CFF-based OpenType (.otf) fonts are not supported"
+            ));
+        }
+        if face.permissions() == Some(Permissions::Restricted)
+            || face
+                .tables()
+                .os2
+                .is_some_and(|os2| !os2.is_outline_embedding_allowed())
+        {
+            return Err(format!(
+                "font '{name}' does not permit embedding its outlines (OS/2 fsType)"
+            ));
+        }
+        // Viewers find a nonsymbolic TrueType font's glyphs through its
+        // Windows Unicode cmap; a font without one would print blank boxes.
+        let windows_unicode = face.tables().cmap.is_some_and(|cmap| {
+            cmap.subtables.into_iter().any(|subtable| {
+                subtable.platform_id == PlatformId::Windows
+                    && matches!(subtable.encoding_id, 1 | 10)
+            })
+        });
+        if !windows_unicode {
+            return Err(format!(
+                "font '{name}' has no Windows Unicode cmap (3,1): PDF viewers could not find its glyphs"
+            ));
+        }
+
+        let units = f64::from(face.units_per_em());
+        let scale = |value: f64| em_thousandths(value, units);
+        let mut widths = [0u16; 256];
+        let mut covered = [false; 256];
+        for byte in 0x20..=0xFF_u8 {
+            let Some(glyph) = winansi_glyph_char(byte).and_then(|ch| face.glyph_index(ch)) else {
+                continue;
+            };
+            let advance = f64::from(face.glyph_hor_advance(glyph).unwrap_or(0));
+            widths[usize::from(byte)] = u16::try_from(scale(advance).clamp(0, 65_535)).unwrap_or(0);
+            covered[usize::from(byte)] = true;
+        }
+        if !covered.contains(&true) {
+            return Err(format!(
+                "font '{name}' maps no WinAnsi characters (it has no Unicode cmap)"
+            ));
+        }
+
+        let mut flags = 32; // Nonsymbolic: glyphs are found through the encoding.
+        if face.is_monospaced() {
+            flags |= 1;
+        }
+        if face.is_italic() {
+            flags |= 64;
+        }
+        let bbox = face.global_bounding_box();
+        let ascent = scale(f64::from(face.ascender()));
+        Ok(Self {
+            name: name.to_string(),
+            base_font: postscript_name(&face)
+                .unwrap_or_else(|| format!("IPStampFont{}", index + 1)),
+            widths,
+            covered,
+            flags,
+            bbox: [
+                scale(f64::from(bbox.x_min)),
+                scale(f64::from(bbox.y_min)),
+                scale(f64::from(bbox.x_max)),
+                scale(f64::from(bbox.y_max)),
+            ],
+            italic_angle: face.italic_angle(),
+            ascent,
+            descent: scale(f64::from(face.descender())),
+            cap_height: face
+                .capital_height()
+                .map_or(ascent, |height| scale(f64::from(height))),
+            data,
+        })
     }
 
-    fn widths(self) -> &'static [u16; 256] {
-        match self {
-            Self::Helvetica => &HELVETICA,
-            Self::HelveticaBold => &HELVETICA_BOLD,
-        }
+    /// Write the font program, its descriptor and the font dictionary; the
+    /// font dictionary's id is returned.
+    fn write(&self, doc: &mut Document) -> ObjectId {
+        let name = || Object::Name(self.base_font.as_bytes().to_vec());
+        let mut file = Stream::new(Dictionary::new(), self.data.clone());
+        file.dict.set(
+            "Length1",
+            Object::Integer(i64::try_from(self.data.len()).unwrap_or(i64::MAX)),
+        );
+        let file_id = doc.add_object(file);
+
+        let mut descriptor = Dictionary::new();
+        descriptor.set("Type", Object::Name(b"FontDescriptor".to_vec()));
+        descriptor.set("FontName", name());
+        descriptor.set("Flags", Object::Integer(self.flags));
+        descriptor.set(
+            "FontBBox",
+            Object::Array(
+                self.bbox
+                    .iter()
+                    .map(|&value| Object::Integer(value))
+                    .collect(),
+            ),
+        );
+        descriptor.set("ItalicAngle", Object::Real(self.italic_angle));
+        descriptor.set("Ascent", Object::Integer(self.ascent));
+        descriptor.set("Descent", Object::Integer(self.descent));
+        descriptor.set("CapHeight", Object::Integer(self.cap_height));
+        descriptor.set("StemV", Object::Integer(80));
+        descriptor.set("FontFile2", Object::Reference(file_id));
+        let descriptor_id = doc.add_object(descriptor);
+
+        let mut font = Dictionary::new();
+        font.set("Type", Object::Name(b"Font".to_vec()));
+        font.set("Subtype", Object::Name(b"TrueType".to_vec()));
+        font.set("BaseFont", name());
+        font.set("FirstChar", Object::Integer(32));
+        font.set("LastChar", Object::Integer(255));
+        font.set(
+            "Widths",
+            Object::Array(
+                self.widths[32..]
+                    .iter()
+                    .map(|&width| Object::Integer(i64::from(width)))
+                    .collect(),
+            ),
+        );
+        font.set("FontDescriptor", Object::Reference(descriptor_id));
+        font.set("Encoding", Object::Name(b"WinAnsiEncoding".to_vec()));
+        doc.add_object(font)
     }
+}
+
+/// A font-unit value in thousandths of an em, the unit of PDF font metrics.
+#[allow(clippy::cast_possible_truncation)]
+fn em_thousandths(value: f64, units_per_em: f64) -> i64 {
+    (value * 1000.0 / units_per_em).round() as i64
+}
+
+/// The font's `PostScript` name (name ID 6), reduced to characters that are
+/// safe in a PDF name.
+fn postscript_name(face: &Face) -> Option<String> {
+    face.names()
+        .into_iter()
+        .filter(|record| record.name_id == ttf_parser::name_id::POST_SCRIPT_NAME)
+        .find_map(|record| record.to_string())
+        .map(|name| {
+            name.chars()
+                .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '+' | '.'))
+                .collect::<String>()
+        })
+        .filter(|name| !name.is_empty())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,11 +307,12 @@ impl Op {
 pub const MIN_FONT_SIZE: f64 = 5.0;
 const MAX_COORD: f64 = 14_400.0;
 
-/// A loaded PDF plus the pending overlay operations.
+/// A loaded PDF plus the fonts added to it and the pending overlay operations.
 #[derive(Debug, Clone)]
 pub struct Stamper {
     doc: Document,
     pages: BTreeMap<u32, ObjectId>,
+    fonts: Vec<EmbeddedFont>,
     ops: Vec<Op>,
 }
 
@@ -142,8 +332,49 @@ impl Stamper {
         Ok(Self {
             doc,
             pages,
+            fonts: Vec::new(),
             ops: Vec::new(),
         })
+    }
+
+    /// Add a TrueType font (the bytes of a .ttf file) that `text()` can then
+    /// use by `name`. Added fonts stay through [`Self::reset`].
+    pub fn add_font(&mut self, name: &str, data: Vec<u8>) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("font name must not be empty".to_string());
+        }
+        if data.is_empty() {
+            return Err("font data must not be empty".to_string());
+        }
+        if Font::parse(name).is_ok() {
+            return Err(format!("'{name}' is the name of a built-in font"));
+        }
+        if self
+            .fonts
+            .iter()
+            .any(|font| font.name.eq_ignore_ascii_case(name))
+        {
+            return Err(format!("font '{name}' was already added"));
+        }
+        let font = EmbeddedFont::parse(name, data, self.fonts.len())?;
+        self.fonts.push(font);
+        Ok(())
+    }
+
+    /// The font `text()` uses for `name`: a font added with
+    /// [`Self::add_font`] (names compare case-insensitively), else a
+    /// built-in one.
+    pub fn font(&self, name: &str) -> Result<Font, String> {
+        let name = name.trim();
+        match self
+            .fonts
+            .iter()
+            .position(|font| font.name.eq_ignore_ascii_case(name))
+        {
+            Some(index) => Ok(Font::Embedded(index)),
+            None => Font::parse(name),
+        }
     }
 
     pub fn page_count(&self) -> usize {
@@ -170,9 +401,28 @@ impl Stamper {
             return Err("max_width must be a positive number of points".to_string());
         }
         let encoded = encode_winansi(&op.text)?;
+        if let Font::Embedded(index) = op.font {
+            let font = self
+                .fonts
+                .get(index)
+                .ok_or_else(|| format!("font #{index} was never added"))?;
+            // encode_winansi writes one byte per character.
+            if let Some(ch) = op
+                .text
+                .chars()
+                .zip(&encoded)
+                .find_map(|(ch, &byte)| (!font.covered[usize::from(byte)]).then_some(ch))
+            {
+                return Err(format!(
+                    "character '{ch}' (U+{:04X}) has no glyph in font '{}'",
+                    u32::from(ch),
+                    font.name
+                ));
+            }
+        }
         let mut size = op.size;
         if let Some(max_width) = op.max_width {
-            let unit_width = text_width(&encoded, op.font, 1.0);
+            let unit_width = text_width(&encoded, self.widths(op.font)?, 1.0);
             if unit_width * size > max_width {
                 size = (max_width / unit_width).max(0.0);
                 if size < MIN_FONT_SIZE {
@@ -216,6 +466,9 @@ impl Stamper {
         for op in &self.ops {
             by_page.entry(op.page()).or_default().push(op);
         }
+        // One font object per font, shared by every page that uses it, so an
+        // added font's program is embedded once.
+        let mut font_ids: BTreeMap<Font, ObjectId> = BTreeMap::new();
         for (page, ops) in by_page {
             let page_id = self.page_id(page)?;
             let (x0, y0, _x1, y1) = self.media_box(page_id)?;
@@ -232,7 +485,7 @@ impl Stamper {
                         if !fonts_used.contains(&op.font) {
                             fonts_used.push(op.font);
                         }
-                        let width = text_width(encoded, op.font, *size);
+                        let width = text_width(encoded, self.widths(op.font)?, *size);
                         let x = match op.align {
                             Align::Left => op.x,
                             Align::Center => op.x - width / 2.0,
@@ -240,7 +493,7 @@ impl Stamper {
                         };
                         push_text(
                             &mut content,
-                            op.font,
+                            &op.font.resource_name(),
                             *size,
                             x0 + x,
                             y0 + height - op.y_top,
@@ -262,7 +515,14 @@ impl Stamper {
             let lead_id = doc.add_object(Stream::new(Dictionary::new(), b"q\n".to_vec()));
             let tail_id = doc.add_object(Stream::new(Dictionary::new(), encoded));
             for font in fonts_used {
-                ensure_font(&mut doc, page_id, font)?;
+                let font_id = if let Some(id) = font_ids.get(&font) {
+                    *id
+                } else {
+                    let id = self.write_font(&mut doc, font)?;
+                    font_ids.insert(font, id);
+                    id
+                };
+                ensure_font(&mut doc, page_id, &font.resource_name(), font_id)?;
             }
             wrap_contents(&mut doc, page_id, lead_id, tail_id)?;
         }
@@ -271,6 +531,39 @@ impl Stamper {
         doc.save_to(&mut out)
             .map_err(|err| format!("cannot write PDF: {err}"))?;
         Ok(out)
+    }
+
+    /// Advance widths (1/1000 em) by `WinAnsiEncoding` byte.
+    fn widths(&self, font: Font) -> Result<&[u16; 256], String> {
+        match font {
+            Font::Helvetica => Ok(&HELVETICA),
+            Font::HelveticaBold => Ok(&HELVETICA_BOLD),
+            Font::Embedded(index) => self
+                .fonts
+                .get(index)
+                .map(|font| &font.widths)
+                .ok_or_else(|| format!("font #{index} was never added")),
+        }
+    }
+
+    /// Add the font's objects to `doc`; returns the font dictionary's id.
+    fn write_font(&self, doc: &mut Document, font: Font) -> Result<ObjectId, String> {
+        if let Font::Embedded(index) = font {
+            return self
+                .fonts
+                .get(index)
+                .map(|embedded| embedded.write(doc))
+                .ok_or_else(|| format!("font #{index} was never added"));
+        }
+        let mut dict = Dictionary::new();
+        dict.set("Type", Object::Name(b"Font".to_vec()));
+        dict.set("Subtype", Object::Name(b"Type1".to_vec()));
+        dict.set(
+            "BaseFont",
+            Object::Name(font.base14().unwrap_or("Helvetica").as_bytes().to_vec()),
+        );
+        dict.set("Encoding", Object::Name(b"WinAnsiEncoding".to_vec()));
+        Ok(doc.add_object(dict))
     }
 
     fn page_id(&self, page: u32) -> Result<ObjectId, String> {
@@ -336,15 +629,12 @@ fn check_coord(name: &str, value: f64) -> Result<(), String> {
     Ok(())
 }
 
-fn push_text(content: &mut Content, font: Font, size: f64, x: f64, y: f64, encoded: &[u8]) {
+fn push_text(content: &mut Content, resource: &str, size: f64, x: f64, y: f64, encoded: &[u8]) {
     let ops = &mut content.operations;
     ops.push(Operation::new("BT", vec![]));
     ops.push(Operation::new(
         "Tf",
-        vec![
-            Object::Name(font.resource_name().as_bytes().to_vec()),
-            real(size),
-        ],
+        vec![Object::Name(resource.as_bytes().to_vec()), real(size)],
     ));
     ops.push(Operation::new("g", vec![real(0.0)]));
     ops.push(Operation::new(
@@ -390,15 +680,46 @@ fn real(value: f64) -> Object {
     Object::Real(((value * 1000.0).round() / 1000.0) as f32)
 }
 
-/// Advance width in points of WinAnsi-encoded bytes at `size`.
-pub fn text_width(encoded: &[u8], font: Font, size: f64) -> f64 {
-    let widths = font.widths();
-    let units: u32 = encoded
+/// Advance width in points of WinAnsi-encoded bytes at `size`, from a font's
+/// width table (1/1000 em by byte).
+pub fn text_width(encoded: &[u8], widths: &[u16; 256], size: f64) -> f64 {
+    let units: f64 = encoded
         .iter()
-        .map(|&b| u32::from(widths[usize::from(b)]))
+        .map(|&b| f64::from(widths[usize::from(b)]))
         .sum();
-    f64::from(units) * size / 1000.0
+    units * size / 1000.0
 }
+
+/// `WinAnsiEncoding` (cp1252) bytes 0x80-0x9F and the characters they encode.
+const CP1252_HIGH: [(u8, char); 27] = [
+    (0x80, '€'),
+    (0x82, '‚'),
+    (0x83, 'ƒ'),
+    (0x84, '„'),
+    (0x85, '…'),
+    (0x86, '†'),
+    (0x87, '‡'),
+    (0x88, 'ˆ'),
+    (0x89, '‰'),
+    (0x8A, 'Š'),
+    (0x8B, '‹'),
+    (0x8C, 'Œ'),
+    (0x8E, 'Ž'),
+    (0x91, '‘'),
+    (0x92, '’'),
+    (0x93, '“'),
+    (0x94, '”'),
+    (0x95, '•'),
+    (0x96, '–'),
+    (0x97, '—'),
+    (0x98, '˜'),
+    (0x99, '™'),
+    (0x9A, 'š'),
+    (0x9B, '›'),
+    (0x9C, 'œ'),
+    (0x9E, 'ž'),
+    (0x9F, 'Ÿ'),
+];
 
 /// Map a string to `WinAnsiEncoding` (cp1252) bytes. Anything outside that
 /// repertoire, and any control character, is an error rather than a silent
@@ -408,61 +729,45 @@ pub fn encode_winansi(text: &str) -> Result<Vec<u8>, String> {
     for ch in text.chars() {
         let byte = match ch {
             '\u{20}'..='\u{7E}' | '\u{A0}'..='\u{FF}' => ch as u8,
-            '€' => 0x80,
-            '‚' => 0x82,
-            'ƒ' => 0x83,
-            '„' => 0x84,
-            '…' => 0x85,
-            '†' => 0x86,
-            '‡' => 0x87,
-            'ˆ' => 0x88,
-            '‰' => 0x89,
-            'Š' => 0x8A,
-            '‹' => 0x8B,
-            'Œ' => 0x8C,
-            'Ž' => 0x8E,
-            '‘' => 0x91,
-            '’' => 0x92,
-            '“' => 0x93,
-            '”' => 0x94,
-            '•' => 0x95,
-            '–' => 0x96,
-            '—' => 0x97,
-            '˜' => 0x98,
-            '™' => 0x99,
-            'š' => 0x9A,
-            '›' => 0x9B,
-            'œ' => 0x9C,
-            'ž' => 0x9E,
-            'Ÿ' => 0x9F,
             '\t' => 0x20,
-            other => {
-                return Err(format!(
-                    "character '{other}' (U+{:04X}) cannot be written with the built-in Helvetica font",
-                    u32::from(other)
-                ));
-            }
+            other => CP1252_HIGH
+                .iter()
+                .find_map(|&(byte, high)| (high == other).then_some(byte))
+                .ok_or_else(|| {
+                    format!(
+                        "character '{other}' (U+{:04X}) cannot be written with a WinAnsi font",
+                        u32::from(other)
+                    )
+                })?,
         };
         out.push(byte);
     }
     Ok(out)
 }
 
-/// Make sure the page's /Resources /Font dictionary maps the stamp font's
-/// resource name to a base-14 font object. Handles a direct resources dict, a
-/// referenced one, and resources inherited from the Pages tree (copied down to
-/// the page so sibling pages are untouched).
-fn ensure_font(doc: &mut Document, page_id: ObjectId, font: Font) -> Result<(), String> {
-    let mut font_dict = Dictionary::new();
-    font_dict.set("Type", Object::Name(b"Font".to_vec()));
-    font_dict.set("Subtype", Object::Name(b"Type1".to_vec()));
-    font_dict.set(
-        "BaseFont",
-        Object::Name(font.base_font().as_bytes().to_vec()),
-    );
-    font_dict.set("Encoding", Object::Name(b"WinAnsiEncoding".to_vec()));
-    let font_id = doc.add_object(font_dict);
+/// The character whose glyph a `WinAnsiEncoding` byte draws. Bytes 0xA0 and
+/// 0xAD are the encoding's second space and hyphen.
+fn winansi_glyph_char(byte: u8) -> Option<char> {
+    match byte {
+        0xA0 => Some(' '),
+        0xAD => Some('-'),
+        0x20..=0x7E | 0xA1..=0xFF => Some(char::from(byte)),
+        _ => CP1252_HIGH
+            .iter()
+            .find_map(|&(high, ch)| (high == byte).then_some(ch)),
+    }
+}
 
+/// Make sure the page's /Resources /Font dictionary maps `resource` to the
+/// font object `font_id`. Handles a direct resources dict, a referenced one,
+/// and resources inherited from the Pages tree (copied down to the page so
+/// sibling pages are untouched).
+fn ensure_font(
+    doc: &mut Document,
+    page_id: ObjectId,
+    resource: &str,
+    font_id: ObjectId,
+) -> Result<(), String> {
     // Locate (or create) the page-level resources dictionary.
     let resources_ref: Option<ObjectId> = {
         let page = doc
@@ -517,7 +822,7 @@ fn ensure_font(doc: &mut Document, page_id: ObjectId, font: Font) -> Result<(), 
             .and_then(Object::as_dict_mut)
             .map_err(|err| format!("font dictionary: {err}"))?
     };
-    fonts.set(font.resource_name(), Object::Reference(font_id));
+    fonts.set(resource, Object::Reference(font_id));
     Ok(())
 }
 
@@ -635,10 +940,259 @@ mod tests {
     #[test]
     fn widths_follow_the_afm_tables() {
         let encoded = encode_winansi("AAA").unwrap();
-        let width = text_width(&encoded, Font::Helvetica, 10.0);
+        let width = text_width(&encoded, &HELVETICA, 10.0);
         assert!((width - 20.01).abs() < 1e-6, "{width}");
-        let bold = text_width(&encoded, Font::HelveticaBold, 10.0);
+        let bold = text_width(&encoded, &HELVETICA_BOLD, 10.0);
         assert!((bold - 21.66).abs() < 1e-6, "{bold}");
+    }
+
+    /// Mrs Saint Delafield (SIL Open Font License, tests/fixtures).
+    const SCRIPT_TTF: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/MrsSaintDelafield-Regular.ttf"
+    ));
+
+    #[test]
+    fn added_fonts_are_embedded_whole_as_winansi_truetype() {
+        let mut stamper = Stamper::load(&fixture()).expect("load");
+        stamper
+            .add_font("Signature", SCRIPT_TTF.to_vec())
+            .expect("add font");
+        let font = stamper
+            .font(" signature ")
+            .expect("names compare case-insensitively");
+        assert_eq!(font, Font::Embedded(0));
+        let mut signed = text_op(1, "Jane Doe");
+        signed.font = font;
+        signed.size = 18.0;
+        stamper
+            .text(signed.clone())
+            .expect("text in the added font");
+        signed.y_top = 140.0;
+        stamper.text(signed).expect("the font again");
+        stamper
+            .text(text_op(1, "plain"))
+            .expect("a built-in font alongside");
+
+        let pdf = stamper.to_pdf().expect("render");
+        let doc = Document::load_mem(&pdf).expect("reparse");
+        let page_id = doc.get_pages()[&1];
+        let text = String::from_utf8_lossy(&doc.get_page_content(page_id)).to_string();
+        assert!(text.contains("/IPStampT1 18 Tf"), "{text}");
+        assert!(text.contains("/IPStampH 9 Tf"), "{text}");
+
+        let fonts = doc.get_page_fonts(page_id).expect("fonts");
+        let embedded = fonts
+            .get(b"IPStampT1".as_slice())
+            .expect("added font registered");
+        let name = |key: &[u8]| embedded.get(key).unwrap().as_name().unwrap().to_vec();
+        assert_eq!(name(b"Subtype"), b"TrueType");
+        assert_eq!(name(b"Encoding"), b"WinAnsiEncoding");
+        assert_eq!(name(b"BaseFont"), b"MrsSaintDelafield-Regular");
+        assert_eq!(embedded.get(b"FirstChar").unwrap().as_i64().unwrap(), 32);
+        assert_eq!(embedded.get(b"LastChar").unwrap().as_i64().unwrap(), 255);
+        let widths = embedded.get(b"Widths").unwrap().as_array().unwrap();
+        assert_eq!(widths.len(), 224);
+        let face = Face::parse(SCRIPT_TTF, 0).unwrap();
+        let advance = face
+            .glyph_hor_advance(face.glyph_index('J').unwrap())
+            .unwrap();
+        let expected = em_thousandths(f64::from(advance), f64::from(face.units_per_em()));
+        assert_eq!(widths[usize::from(b'J' - 32)].as_i64().unwrap(), expected);
+
+        let descriptor = doc
+            .get_dictionary(
+                embedded
+                    .get(b"FontDescriptor")
+                    .unwrap()
+                    .as_reference()
+                    .unwrap(),
+            )
+            .expect("descriptor");
+        assert_eq!(
+            descriptor.get(b"Flags").unwrap().as_i64().unwrap() & 32,
+            32,
+            "nonsymbolic, so viewers find glyphs through WinAnsiEncoding"
+        );
+        let program = doc
+            .get_object(
+                descriptor
+                    .get(b"FontFile2")
+                    .unwrap()
+                    .as_reference()
+                    .unwrap(),
+            )
+            .and_then(Object::as_stream)
+            .expect("font program");
+        assert_eq!(
+            program.dict.get(b"Length1").unwrap().as_i64().unwrap(),
+            i64::try_from(SCRIPT_TTF.len()).unwrap()
+        );
+        assert_eq!(
+            program.decompressed_content().unwrap(),
+            SCRIPT_TTF.to_vec(),
+            "the whole font program, byte for byte"
+        );
+        // The fixture embeds its own fonts; the stamp adds exactly one program.
+        let programs = |doc: &Document| {
+            doc.objects
+                .values()
+                .filter(|object| {
+                    object
+                        .as_stream()
+                        .is_ok_and(|stream| stream.dict.has(b"Length1"))
+                })
+                .count()
+        };
+        let template = Document::load_mem(&fixture()).expect("template");
+        assert_eq!(
+            programs(&doc),
+            programs(&template) + 1,
+            "one embedded copy however often it is used"
+        );
+    }
+
+    #[test]
+    fn added_fonts_are_validated() {
+        let mut stamper = Stamper::load(&fixture()).expect("load");
+        let err = |result: Result<(), String>| result.unwrap_err();
+        assert!(err(stamper.add_font(" ", SCRIPT_TTF.to_vec())).contains("must not be empty"));
+        assert!(err(stamper.add_font("Script", Vec::new())).contains("must not be empty"));
+        assert!(
+            err(stamper.add_font("Script", b"not a font".to_vec())).contains("cannot parse font")
+        );
+        let mut collection = b"ttcf".to_vec();
+        collection.extend_from_slice(SCRIPT_TTF);
+        assert!(err(stamper.add_font("Script", collection)).contains(".ttc"));
+        assert!(err(stamper.add_font("Helvetica-Bold", SCRIPT_TTF.to_vec())).contains("built-in"));
+        stamper
+            .add_font("Script", SCRIPT_TTF.to_vec())
+            .expect("add");
+        assert!(err(stamper.add_font("SCRIPT", SCRIPT_TTF.to_vec())).contains("already added"));
+        assert!(
+            stamper
+                .font("Comic Sans")
+                .unwrap_err()
+                .contains("unknown font")
+        );
+        assert_eq!(stamper.font("bold").unwrap(), Font::HelveticaBold);
+
+        let mut stray = text_op(1, "x");
+        stray.font = Font::Embedded(7);
+        assert!(stamper.text(stray).unwrap_err().contains("never added"));
+    }
+
+    /// The fixture with one of its tables edited in place (table checksums
+    /// are not verified by the parser, so the edit is all that changes).
+    fn patched_fixture(tag: [u8; 4], edit: impl Fn(&mut [u8])) -> Vec<u8> {
+        let mut font = SCRIPT_TTF.to_vec();
+        let tables = usize::from(u16::from_be_bytes([font[4], font[5]]));
+        let record = (0..tables)
+            .map(|i| 12 + 16 * i)
+            .find(|&at| font[at..at + 4] == tag)
+            .expect("table present");
+        let offset = u32::from_be_bytes(font[record + 8..record + 12].try_into().unwrap()) as usize;
+        let length =
+            u32::from_be_bytes(font[record + 12..record + 16].try_into().unwrap()) as usize;
+        edit(&mut font[offset..offset + length]);
+        font
+    }
+
+    #[test]
+    fn fonts_whose_licence_forbids_embedding_are_refused() {
+        // OS/2 fsType sits at byte 8: 0x0002 restricted, 0x0200 bitmap only.
+        for fs_type in [0x0002_u16, 0x0200] {
+            let font = patched_fixture(*b"OS/2", |os2| {
+                os2[8..10].copy_from_slice(&fs_type.to_be_bytes());
+            });
+            let mut stamper = Stamper::load(&fixture()).expect("load");
+            let err = stamper.add_font("Script", font).unwrap_err();
+            assert!(
+                err.contains("does not permit embedding"),
+                "{fs_type:#06x}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn fonts_without_a_windows_unicode_cmap_are_refused() {
+        // Relabel every (3,1) encoding record as (0,3): the glyphs stay
+        // reachable through Unicode-platform records, which PDF viewers ignore.
+        let font = patched_fixture(*b"cmap", |cmap| {
+            let records = usize::from(u16::from_be_bytes([cmap[2], cmap[3]]));
+            for at in (0..records).map(|i| 4 + 8 * i) {
+                if cmap[at..at + 4] == [0, 3, 0, 1] {
+                    cmap[at..at + 4].copy_from_slice(&[0, 0, 0, 3]);
+                }
+            }
+        });
+        assert!(
+            Face::parse(&font, 0).unwrap().glyph_index('a').is_some(),
+            "still mapped for the parser"
+        );
+        let mut stamper = Stamper::load(&fixture()).expect("load");
+        let err = stamper.add_font("Script", font).unwrap_err();
+        assert!(err.contains("no Windows Unicode cmap"), "{err}");
+    }
+
+    #[test]
+    fn characters_without_a_glyph_in_an_added_font_are_rejected() {
+        let mut stamper = Stamper::load(&fixture()).expect("load");
+        stamper
+            .add_font("Script", SCRIPT_TTF.to_vec())
+            .expect("add");
+        let font = &stamper.fonts[0];
+        assert!(font.covered[usize::from(b'a')] && font.covered[usize::from(b' ')]);
+        let Some(byte) = (0x20..=0xFF_u8)
+            .find(|&byte| winansi_glyph_char(byte).is_some() && !font.covered[usize::from(byte)])
+        else {
+            return; // the fixture covers every WinAnsi character
+        };
+        let ch = winansi_glyph_char(byte).unwrap();
+        let mut op = text_op(1, &format!("ab{ch}"));
+        op.font = stamper.font("Script").unwrap();
+        let message = stamper.text(op).unwrap_err();
+        assert!(
+            message.contains("has no glyph in font 'Script'"),
+            "{message}"
+        );
+        assert_eq!(stamper.pending_ops(), 0);
+    }
+
+    #[test]
+    fn added_fonts_shrink_to_fit_with_their_own_widths() {
+        let mut stamper = Stamper::load(&fixture()).expect("load");
+        stamper
+            .add_font("Script", SCRIPT_TTF.to_vec())
+            .expect("add");
+        let mut op = text_op(1, "Jane Doe");
+        op.font = stamper.font("Script").unwrap();
+        op.size = 30.0;
+        let natural = text_width(
+            &encode_winansi("Jane Doe").unwrap(),
+            &stamper.fonts[0].widths,
+            30.0,
+        );
+        op.max_width = Some(natural / 2.0);
+        stamper.text(op).expect("shrinks");
+        match &stamper.ops[0] {
+            Op::Text { size, .. } => assert!((*size - 15.0).abs() < 1e-6, "{size}"),
+            Op::Check(_) => panic!("expected a text op"),
+        }
+    }
+
+    #[test]
+    fn winansi_bytes_map_back_to_their_characters() {
+        for (byte, ch) in CP1252_HIGH {
+            assert_eq!(winansi_glyph_char(byte), Some(ch));
+            assert_eq!(encode_winansi(&ch.to_string()).unwrap(), vec![byte]);
+        }
+        assert_eq!(winansi_glyph_char(b'A'), Some('A'));
+        assert_eq!(winansi_glyph_char(0xE9), Some('é'));
+        assert_eq!(winansi_glyph_char(0xA0), Some(' '));
+        assert_eq!(winansi_glyph_char(0xAD), Some('-'));
+        assert_eq!(winansi_glyph_char(0x81), None);
+        assert_eq!(winansi_glyph_char(0x7F), None);
     }
 
     #[test]

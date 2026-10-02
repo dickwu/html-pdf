@@ -118,14 +118,28 @@ namespace Ironpress {
      *
      * Coordinates are PDF points with y measured from the TOP edge of the page:
      * `text()` takes the baseline, `check()` the top-left corner of the box.
-     * Text uses the built-in Helvetica / Helvetica-Bold (`WinAnsi`); characters
-     * outside that repertoire raise an exception instead of printing a `?`.
+     * Text uses the built-in Helvetica / Helvetica-Bold or a TrueType font added
+     * with `addFont()`, always `WinAnsi`-encoded; characters outside that
+     * repertoire raise an exception instead of printing a `?`.
      */
     class PdfStamper {
         /**
          * @param string $pdf
          */
         public function __construct(string $pdf) {}
+
+        /**
+         * Embed a TrueType font (the bytes of a .ttf file) that `text()` can then
+         * use by `name`, for example a script face for a signature line. The
+         * whole file is embedded once per PDF. Text in it is still `WinAnsi`, and
+         * a character the font has no glyph for throws. Added fonts stay through
+         * `reset()`.
+         *
+         * @param string $name
+         * @param string $ttf_data
+         * @return void
+         */
+        public function addFont(string $name, string $ttf_data): void {}
 
         /**
          * Queue a vector tick inside a `size`-pt box whose top-left corner is
@@ -171,9 +185,10 @@ namespace Ironpress {
 
         /**
          * Queue a single-line text at baseline (`x`, `y_top`) on a 1-based page.
-         * `size` defaults to 9 pt, `font` to Helvetica (or Helvetica-Bold),
-         * `align` to left (or center / right, anchored on `x`), and `max_width`
-         * shrinks the font down to 5 pt so the text fits, else throws.
+         * `size` defaults to 9 pt, `font` to Helvetica (or Helvetica-Bold, or a
+         * font added with `addFont()`), `align` to left (or center / right,
+         * anchored on `x`), and `max_width` shrinks the font down to 5 pt so the
+         * text fits, else throws.
          *
          * @param int $page
          * @param float $x

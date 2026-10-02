@@ -9,7 +9,7 @@ use ironpress_core::{HtmlConverter as CoreHtmlConverter, Margin, PageSize};
 mod base14;
 mod stamper;
 
-use stamper::{Align, CheckOp, Font, Stamper, TextOp};
+use stamper::{Align, CheckOp, Stamper, TextOp};
 
 type PdfBinary = Binary<u8>;
 
@@ -299,8 +299,9 @@ impl HtmlConverter {
 ///
 /// Coordinates are PDF points with y measured from the TOP edge of the page:
 /// `text()` takes the baseline, `check()` the top-left corner of the box.
-/// Text uses the built-in Helvetica / Helvetica-Bold (`WinAnsi`); characters
-/// outside that repertoire raise an exception instead of printing a `?`.
+/// Text uses the built-in Helvetica / Helvetica-Bold or a TrueType font added
+/// with `addFont()`, always `WinAnsi`-encoded; characters outside that
+/// repertoire raise an exception instead of printing a `?`.
 #[php_class]
 #[php(name = "Ironpress\\PdfStamper")]
 #[derive(Debug, Clone)]
@@ -331,10 +332,24 @@ impl PdfStamper {
         Ok(vec![width, height])
     }
 
+    /// Embed a TrueType font (the bytes of a .ttf file) that `text()` can then
+    /// use by `name`, for example a script face for a signature line. The
+    /// whole file is embedded once per PDF. Text in it is still `WinAnsi`, and
+    /// a character the font has no glyph for throws. Added fonts stay through
+    /// `reset()`.
+    pub fn add_font(&mut self, name: &str, ttf_data: Binary<u8>) -> PhpResult<()> {
+        let bytes = Vec::from(ttf_data);
+        if bytes.len() > 50 * 1024 * 1024 {
+            return Err(php_err("font data exceeds 50 MB limit"));
+        }
+        self.inner.add_font(name, bytes).map_err(php_err)
+    }
+
     /// Queue a single-line text at baseline (`x`, `y_top`) on a 1-based page.
-    /// `size` defaults to 9 pt, `font` to Helvetica (or Helvetica-Bold),
-    /// `align` to left (or center / right, anchored on `x`), and `max_width`
-    /// shrinks the font down to 5 pt so the text fits, else throws.
+    /// `size` defaults to 9 pt, `font` to Helvetica (or Helvetica-Bold, or a
+    /// font added with `addFont()`), `align` to left (or center / right,
+    /// anchored on `x`), and `max_width` shrinks the font down to 5 pt so the
+    /// text fits, else throws.
     #[allow(clippy::too_many_arguments)]
     pub fn text(
         &mut self,
@@ -353,7 +368,7 @@ impl PdfStamper {
             y_top,
             text: text.to_string(),
             size: size.unwrap_or(9.0),
-            font: Font::parse(font.unwrap_or("")).map_err(php_err)?,
+            font: self.inner.font(font.unwrap_or("")).map_err(php_err)?,
             align: Align::parse(align.unwrap_or("")).map_err(php_err)?,
             max_width,
         };
