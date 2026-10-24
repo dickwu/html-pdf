@@ -1272,7 +1272,7 @@ dependencies = [
 [[package]]
 name = "ironpress"
 version = "1.7.0"
-source = "git+https://github.com/dickwu/ironpress.git?branch=feat%2Fsentinel-1.7#15310c10093ea5b32b73ccf463a0a21a5279363b"
+source = "git+https://github.com/dickwu/ironpress.git?branch=fix%2Fmeal-plan-overflow-1.7#cdf72aef4b45e36b915ae33f5837d1725f600c93"
 dependencies = [
  "bogon",
  "core-net",
@@ -1305,7 +1305,7 @@ dependencies = [
 
 [[package]]
 name = "ironpress-php"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "ext-php-rs",
  "ironpress",

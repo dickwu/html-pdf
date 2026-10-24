@@ -1,6 +1,6 @@
 [package]
 name = "ironpress-php"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -17,7 +17,7 @@ lopdf = "0.45"
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 # Ironpress core (HTML/CSS/Markdown -> PDF engine). Cargo.lock pins the exact
 # commit for reproducible prod builds.
-ironpress_core = { package = "ironpress", git = "https://github.com/dickwu/ironpress.git", branch = "feat/sentinel-1.7", default-features = false }
+ironpress_core = { package = "ironpress", git = "https://github.com/dickwu/ironpress.git", branch = "fix/meal-plan-overflow-1.7", default-features = false }
 
 [features]
 default = []
