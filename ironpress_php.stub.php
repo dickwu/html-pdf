@@ -65,6 +65,18 @@ namespace Ironpress {
         public function landscape(bool $enabled): void {}
 
         /**
+         * Table-cell metrics compatible with ironpress-php 0.2.x (Ironpress 1.4):
+         * collapsed borders take no layout space, only a cell's first-top and
+         * last-bottom child margins are kept, and tables get no default
+         * `border-spacing`. On by default; pass `false` for Chromium-like
+         * table-cell metrics.
+         *
+         * @param bool $enabled
+         * @return void
+         */
+        public function legacyTableCellMetrics(bool $enabled): void {}
+
+        /**
          * @param float $points
          * @return void
          */

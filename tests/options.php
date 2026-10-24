@@ -51,4 +51,26 @@ expectException(fn () => $converter->addFont('Empty', ''), 'font data must not b
 
 $converter->clearFonts();
 
+// Table-cell metrics: 0.2.x-compatible by default, Chromium-like on request.
+$sentinel = '<div style="height:2.5pt;background-color:#010203"></div>';
+$cellHtml = '<html><head><style>@page { size: 612pt 14000pt; margin: 0; } body { margin: 0; font-size: 10pt; line-height: 12pt; }</style></head><body>'
+    . $sentinel
+    . '<table style="border-collapse:collapse;width:100%"><tr><td style="padding:0;border:6pt solid #000"><p style="margin:10pt 0 0 0">x</p><p style="margin:0 0 10pt 0">y</p></td></tr></table>'
+    . $sentinel . '</body></html>';
+$band = static function (Ironpress\HtmlConverter $c) use ($cellHtml): float {
+    $tops = $c->measureSentinelTops($cellHtml, 2.5, '#010203');
+    require_true(count($tops) === 2, 'Expected two sentinels');
+    return $tops[1] - $tops[0] - 2.5;
+};
+$metrics = new Ironpress\HtmlConverter();
+$legacyBand = $band($metrics);
+require_true(abs($legacyBand - 44.0) < 0.1, "0.2.x cell metrics: expected 44pt, got $legacyBand");
+$metrics->legacyTableCellMetrics(false);
+$chromiumBand = $band($metrics);
+require_true(abs($chromiumBand - 56.0) < 0.1, "Chromium cell metrics: expected 56pt, got $chromiumBand");
+
+// A no-break space extracts as a plain space.
+$nbspPdf = (new Ironpress\HtmlConverter())->convert("<p>500\u{00A0}mL</p>");
+require_true(str_contains($nbspPdf, '<0020>') && !str_contains($nbspPdf, '<00A0>'), 'No-break space should map to U+0020 in ToUnicode');
+
 echo "OK\n";

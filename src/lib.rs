@@ -13,6 +13,10 @@ use stamper::{Align, CheckOp, Stamper, TextOp};
 
 type PdfBinary = Binary<u8>;
 
+/// `Ironpress\\HtmlConverter` keeps the 0.2.x table-cell metrics unless the
+/// caller opts out, so layouts tuned against 0.2.x keep their page breaks.
+const LEGACY_TABLE_CELL_METRICS_DEFAULT: bool = true;
+
 fn pdf_to_php_bytes(pdf: Vec<u8>) -> PdfBinary {
     Binary::new(pdf)
 }
@@ -74,11 +78,27 @@ fn page_size_by_name(name: &str) -> PhpResult<PageSize> {
     }
 }
 
+/// The converter behind the `ironpress_*` functions: default settings plus
+/// the same table-cell metrics default as `Ironpress\\HtmlConverter`.
+fn default_converter() -> CoreHtmlConverter {
+    CoreHtmlConverter::new().legacy_table_cell_metrics(LEGACY_TABLE_CELL_METRICS_DEFAULT)
+}
+
+fn read_input(input: &str) -> PhpResult<String> {
+    fs::read_to_string(input).map_err(|err| php_err(format!("Failed to read '{input}': {err}")))
+}
+
+fn write_output(output: &str, pdf: Vec<u8>) -> PhpResult<()> {
+    fs::write(output, pdf)
+        .map_err(|err| php_err(format!("Failed to write PDF to '{output}': {err}")))
+}
+
 /// Convert HTML to PDF bytes.
 #[php_function]
 #[php(name = "ironpress_html_to_pdf")]
 pub fn html_to_pdf(html: &str) -> PhpResult<PdfBinary> {
-    ironpress_core::html_to_pdf(html)
+    default_converter()
+        .convert(html)
         .map(pdf_to_php_bytes)
         .map_err(map_ironpress_err)
 }
@@ -87,17 +107,18 @@ pub fn html_to_pdf(html: &str) -> PhpResult<PdfBinary> {
 #[php_function]
 #[php(name = "ironpress_html_to_pdf_file")]
 pub fn html_to_pdf_file(html: &str, output: &str) -> PhpResult<()> {
-    let pdf = ironpress_core::html_to_pdf(html).map_err(map_ironpress_err)?;
-
-    fs::write(output, pdf)
-        .map_err(|err| php_err(format!("Failed to write PDF to '{output}': {err}")))
+    let pdf = default_converter()
+        .convert(html)
+        .map_err(map_ironpress_err)?;
+    write_output(output, pdf)
 }
 
 /// Convert Markdown to PDF bytes.
 #[php_function]
 #[php(name = "ironpress_markdown_to_pdf")]
 pub fn markdown_to_pdf(markdown: &str) -> PhpResult<PdfBinary> {
-    ironpress_core::markdown_to_pdf(markdown)
+    default_converter()
+        .convert_markdown(markdown)
         .map(pdf_to_php_bytes)
         .map_err(map_ironpress_err)
 }
@@ -106,14 +127,22 @@ pub fn markdown_to_pdf(markdown: &str) -> PhpResult<PdfBinary> {
 #[php_function]
 #[php(name = "ironpress_convert_file")]
 pub fn convert_file(input: &str, output: &str) -> PhpResult<()> {
-    ironpress_core::convert_file(input, output).map_err(map_ironpress_err)
+    let html = read_input(input)?;
+    let pdf = default_converter()
+        .convert(&html)
+        .map_err(map_ironpress_err)?;
+    write_output(output, pdf)
 }
 
 /// Convert a Markdown file to a PDF file.
 #[php_function]
 #[php(name = "ironpress_convert_markdown_file")]
 pub fn convert_markdown_file(input: &str, output: &str) -> PhpResult<()> {
-    ironpress_core::convert_markdown_file(input, output).map_err(map_ironpress_err)
+    let markdown = read_input(input)?;
+    let pdf = default_converter()
+        .convert_markdown(&markdown)
+        .map_err(map_ironpress_err)?;
+    write_output(output, pdf)
 }
 
 /// Return the PHP extension version.
@@ -136,6 +165,7 @@ pub struct HtmlConverter {
     footer: Option<String>,
     base_path: Option<PathBuf>,
     fonts: Vec<(String, Vec<u8>)>,
+    legacy_table_cell_metrics: bool,
 }
 
 #[php_impl]
@@ -150,6 +180,7 @@ impl HtmlConverter {
             footer: None,
             base_path: None,
             fonts: Vec::new(),
+            legacy_table_cell_metrics: LEGACY_TABLE_CELL_METRICS_DEFAULT,
         }
     }
 
@@ -221,6 +252,15 @@ impl HtmlConverter {
         self.fonts.clear();
     }
 
+    /// Table-cell metrics compatible with ironpress-php 0.2.x (Ironpress 1.4):
+    /// collapsed borders take no layout space, only a cell's first-top and
+    /// last-bottom child margins are kept, and tables get no default
+    /// `border-spacing`. On by default; pass `false` for Chromium-like
+    /// table-cell metrics.
+    pub fn legacy_table_cell_metrics(&mut self, enabled: bool) {
+        self.legacy_table_cell_metrics = enabled;
+    }
+
     pub fn convert(&self, html: &str) -> PhpResult<PdfBinary> {
         self.build_converter()
             .convert(html)
@@ -274,7 +314,8 @@ impl HtmlConverter {
         let mut converter = CoreHtmlConverter::new()
             .page_size(self.effective_page_size())
             .margin(self.margin)
-            .sanitize(self.sanitize);
+            .sanitize(self.sanitize)
+            .legacy_table_cell_metrics(self.legacy_table_cell_metrics);
 
         if let Some(header) = &self.header {
             converter = converter.header(header.clone());

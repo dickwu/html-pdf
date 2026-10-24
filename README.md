@@ -104,6 +104,15 @@ $converter->addFont('Inter', file_get_contents(__DIR__ . '/fonts/Inter.ttf'));
 $pdf = $converter->convert('<p style="font-family: Inter">Custom font text</p>');
 ```
 
+### Table-cell metrics
+
+Tables are measured the way ironpress-php 0.2.x measured them, so layouts tuned
+against 0.2.x keep their page breaks: collapsed borders take no layout space,
+only a cell's first-top and last-bottom child margins are kept, and tables get
+no default `border-spacing`. The `ironpress_*` functions use the same default.
+Call `$converter->legacyTableCellMetrics(false)` for Chromium-like table-cell
+metrics instead.
+
 ### Stamping an existing PDF
 
 `Ironpress\PdfStamper` writes text and tick marks on top of the pages of an
