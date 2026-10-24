@@ -107,9 +107,9 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            RUSTFLAGS="-C link-arg=-Wl,-undefined,dynamic_lookup" cargo install cargo-php --version 0.1.21 --locked
+            RUSTFLAGS="-C link-arg=-Wl,-undefined,dynamic_lookup" cargo install cargo-php --version 0.2.1 --locked
           else
-            cargo install cargo-php --version 0.1.21 --locked
+            cargo install cargo-php --version 0.2.1 --locked
           fi
           cargo php stubs -o /tmp/ironpress_php.stub.php
           diff -u ironpress_php.stub.php /tmp/ironpress_php.stub.php
