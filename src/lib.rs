@@ -18,7 +18,7 @@ fn pdf_to_php_bytes(pdf: Vec<u8>) -> PdfBinary {
 }
 
 fn php_err(message: impl Into<String>) -> PhpException {
-    PhpException::default(message.into())
+    PhpException::from_message(message.into())
 }
 
 #[allow(clippy::needless_pass_by_value)]

@@ -1,6 +1,6 @@
 [package]
 name = "ironpress-php"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -11,13 +11,13 @@ name = "ironpress_php"
 crate-type = ["cdylib"]
 
 [dependencies]
-ext-php-rs = "=0.15.12"
+ext-php-rs = "=0.16.3"
 lopdf = "0.45"
 # Metrics of fonts added to PdfStamper (already in the tree through the engine).
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 # Ironpress core (HTML/CSS/Markdown -> PDF engine). Cargo.lock pins the exact
 # commit for reproducible prod builds.
-ironpress_core = { package = "ironpress", git = "https://github.com/dickwu/ironpress.git", branch = "feat/port-unique-work-1.6.0-sentinel", default-features = false }
+ironpress_core = { package = "ironpress", git = "https://github.com/dickwu/ironpress.git", branch = "feat/sentinel-1.7", default-features = false }
 
 [features]
 default = []
