@@ -107,9 +107,12 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            RUSTFLAGS="-C link-arg=-Wl,-undefined,dynamic_lookup" cargo install cargo-php --git https://github.com/extphprs/ext-php-rs --tag ext-php-rs-v0.16.3 --locked
+            RUSTFLAGS="-C link-arg=-Wl,-undefined,dynamic_lookup" cargo install cargo-php --version 0.2.1 --locked
           else
-            cargo install cargo-php --git https://github.com/extphprs/ext-php-rs --tag ext-php-rs-v0.16.3 --locked
+            cargo install cargo-php --version 0.2.1 --locked
           fi
-          cargo php stubs -o /tmp/ironpress_php.stub.php
+          # Linux links cdylibs with BIND_NOW, so every undefined symbol must
+          # resolve when cargo-php dlopen()s the debug build. ext-php-rs's wrapper.c
+          # keeps a dead _femalloc branch from PHP 8.3 headers at -O0; -O2 folds it.
+          CFLAGS="${CFLAGS:-} -O2" cargo php stubs -o /tmp/ironpress_php.stub.php
           diff -u ironpress_php.stub.php /tmp/ironpress_php.stub.php
