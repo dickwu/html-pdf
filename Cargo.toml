@@ -11,7 +11,7 @@ name = "ironpress_php"
 crate-type = ["cdylib"]
 
 [dependencies]
-ext-php-rs = "=0.15.12"
+ext-php-rs = "=0.16.3"
 lopdf = "0.45"
 # Metrics of fonts added to PdfStamper (already in the tree through the engine).
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
