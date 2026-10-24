@@ -33,7 +33,7 @@ php -d extension=./target/release/libironpress_php.dylib tests/options.php
 ## Install Into Current PHP
 
 ```sh
-cargo install cargo-php --version 0.2.1 --locked
+cargo install cargo-php --version 0.1.21 --locked
 cargo php install --release --yes
 php -m | grep ironpress
 ```
@@ -41,7 +41,7 @@ php -m | grep ironpress
 On macOS, if `cargo-php` fails to install because the PHP symbols are unresolved during linking, install it with PHP's extension linker mode:
 
 ```sh
-RUSTFLAGS='-C link-arg=-Wl,-undefined,dynamic_lookup' cargo install cargo-php --version 0.2.1 --locked
+RUSTFLAGS='-C link-arg=-Wl,-undefined,dynamic_lookup' cargo install cargo-php --version 0.1.21 --locked
 ```
 
 ## Install With Homebrew
