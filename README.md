@@ -28,6 +28,24 @@ On macOS, Cargo builds `./target/release/libironpress_php.dylib`:
 ```sh
 php -d extension=./target/release/libironpress_php.dylib tests/smoke.php
 php -d extension=./target/release/libironpress_php.dylib tests/options.php
+php -d extension=./target/release/libironpress_php.dylib tests/stamper.php
+php -d extension=./target/release/libironpress_php.dylib tests/merge.php
+```
+
+Add `-n` when a Homebrew build of the extension is already loaded from
+`conf.d`, otherwise PHP warns that the module is loaded twice and keeps the
+installed one.
+
+The merge matrix needs `qpdf`, poppler (`pdfinfo`, `pdftotext`, `pdfimages`,
+`pdftoppm`), ImageMagick and ghostscript, plus Python `reportlab` for some
+fixtures. It generates synthetic PDFs (about 60 MB with `--large`) into an
+ignored build directory, checks every merged page against its source and
+against the PNGs in `tests/fixtures/merge/golden/`, and prints a table:
+
+```sh
+python3 tests/fixtures/merge/generate.py tests/fixtures/merge/build --large
+php -n -d extension=./target/release/libironpress_php.dylib tests/merge-matrix.php tests/fixtures/merge/build
+# after an intended rendering change: add --update-goldens
 ```
 
 ## Install Into Current PHP
@@ -143,6 +161,48 @@ loaded template can be filled many times. Added fonts stay through `reset()`
 and are embedded once per PDF, only when a text uses them. Only TrueType
 outlines (`glyf`) are supported; `.otf` (CFF) fonts, font collections and
 fonts whose licence forbids embedding (OS/2 `fsType` restricted) are refused.
+
+### Merging PDFs
+
+`Ironpress\PdfMerger` appends the pages of other PDFs (scans, lab reports,
+attachments from any producer) to a PDF, typically one ironpress just made.
+Each page keeps its size, rotation, fonts and images, including attributes it
+inherits from its page tree.
+
+```php
+$merger = new Ironpress\PdfMerger(ironpress_html_to_pdf($html));
+$merger->maxPages(500);               // default 5000
+$merger->maxInputBytes(50 << 20);     // per input, default 128 MiB
+foreach ($attachments as $pdf) {
+    try {
+        $merger->append($pdf);       // returns the number of pages added
+    } catch (Ironpress\EncryptedPdfException $e) {
+        // password-protected (code PASSWORD_PROTECTED) or
+        // owner-restricted (code OWNER_RESTRICTED); skip or ask for a copy
+    } catch (Ironpress\InvalidPdfException $e) {
+        // EMPTY, NOT_PDF, CORRUPT or NO_PAGES
+    }
+}
+file_put_contents('out.pdf', $merger->toPdf());
+
+// or all at once; the message names the failing index ("PDF #2: ...")
+$pdf = ironpress_pdf_merge([$first, $second, $third]);
+```
+
+All errors extend `Ironpress\PdfMergeException` (itself an `\Exception`),
+and `getCode()` is one of its constants. A rejected input leaves the merger
+exactly as it was, so the remaining inputs can still be appended. Size and page
+limits throw `Ironpress\PdfLimitException`. The exception classes are thrown
+by the extension only; PHP code cannot `new` them.
+
+PDFs that open without a password but carry owner restrictions (no printing,
+no copying) are rejected by default because the merged copy would not keep the
+restrictions; call `allowOwnerRestricted(true)` to accept them.
+
+Only pages are merged. Bookmarks, form-field trees (widgets still show but are
+no longer fillable), named destinations, tagged-PDF structure and optional
+content of appended PDFs are dropped, and identical fonts or images in several
+inputs are stored once per input.
 
 ## Security Defaults
 

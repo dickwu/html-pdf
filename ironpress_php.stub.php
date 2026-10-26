@@ -4,6 +4,13 @@
 
 namespace Ironpress {
     /**
+     * The input is encrypted (password-protected or owner-restricted).
+     */
+    class EncryptedPdfException extends \Ironpress\PdfMergeException {
+        public function __construct() {}
+    }
+
+    /**
      * Stateful HTML converter exposed as Ironpress\HtmlConverter.
      */
     class HtmlConverter {
@@ -121,6 +128,134 @@ namespace Ironpress {
          * @return void
          */
         public function sanitize(bool $enabled): void {}
+    }
+
+    /**
+     * The input is empty, not a PDF, corrupt, or has no pages.
+     */
+    class InvalidPdfException extends \Ironpress\PdfMergeException {
+        public function __construct() {}
+    }
+
+    /**
+     * The input or the merged document is over a configured limit.
+     */
+    class PdfLimitException extends \Ironpress\PdfMergeException {
+        public function __construct() {}
+    }
+
+    /**
+     * Base class of every error `Ironpress\\PdfMerger` and `ironpress_pdf_merge()`
+     * throw. `getCode()` tells the cases apart (see the constants).
+     */
+    class PdfMergeException extends \Exception {
+        /**
+         * The input looks like a PDF but cannot be parsed.
+         */
+        public const CORRUPT = 3;
+
+        /**
+         * The input is zero bytes long (or no PDFs were passed).
+         */
+        public const EMPTY = 1;
+
+        /**
+         * The input is larger than `maxInputBytes()`.
+         */
+        public const INPUT_TOO_LARGE = 20;
+
+        /**
+         * The input has no `%PDF-` header.
+         */
+        public const NOT_PDF = 2;
+
+        /**
+         * The input parses but its page tree is empty.
+         */
+        public const NO_PAGES = 4;
+
+        /**
+         * The input opens without a password but has owner restrictions.
+         */
+        public const OWNER_RESTRICTED = 11;
+
+        /**
+         * The input needs a password to open.
+         */
+        public const PASSWORD_PROTECTED = 10;
+
+        /**
+         * The merged document would exceed `maxPages()`.
+         */
+        public const TOO_MANY_PAGES = 21;
+
+        public function __construct() {}
+    }
+
+    /**
+     * Append the pages of other PDFs to a PDF, exposed as `Ironpress\\PdfMerger`.
+     * Each copied page keeps its size, rotation, fonts and images; outlines,
+     * form fields and other document-level structures of appended PDFs are
+     * dropped. A rejected input throws a `PdfMergeException` subclass and leaves
+     * the merger unchanged.
+     */
+    class PdfMerger {
+        /**
+         * Start from `pdf` (e.g. the output of `HtmlConverter::convert()`); its
+         * pages come first.
+         *
+         * @param string $pdf
+         */
+        public function __construct(string $pdf) {}
+
+        /**
+         * Accept PDFs that open without a password but carry owner restrictions
+         * (off by default). Their pages are copied unencrypted, so the
+         * restrictions do not carry over.
+         *
+         * @param bool $enabled
+         * @return void
+         */
+        public function allowOwnerRestricted(bool $enabled): void {}
+
+        /**
+         * Append every page of `pdf`; returns the number of pages added.
+         *
+         * @param string $pdf
+         * @return int
+         */
+        public function append(string $pdf): int {}
+
+        /**
+         * Reject inputs larger than `bytes` (default 128 MiB).
+         *
+         * @param int $bytes
+         * @return void
+         */
+        public function maxInputBytes(int $bytes): void {}
+
+        /**
+         * Reject an append that would make the document longer than `pages`
+         * pages (default 5000).
+         *
+         * @param int $pages
+         * @return void
+         */
+        public function maxPages(int $pages): void {}
+
+        /**
+         * Pages in the merged document so far.
+         *
+         * @return int
+         */
+        public function pageCount(): int {}
+
+        /**
+         * The merged PDF. More PDFs can still be appended afterwards.
+         *
+         * @return string
+         */
+        public function toPdf(): string {}
     }
 
     /**
@@ -268,6 +403,15 @@ namespace {
      * @return string
      */
     function ironpress_markdown_to_pdf(string $markdown): string {}
+
+    /**
+     * Merge PDFs in order into one PDF. Throws a `PdfMergeException` subclass
+     * naming the failing index (`PDF #n: ...`).
+     *
+     * @param array $pdfs
+     * @return string
+     */
+    function ironpress_pdf_merge(array $pdfs): string {}
 
     /**
      * Return the PHP extension version.

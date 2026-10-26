@@ -5,3 +5,5 @@
 /tests/smoke-input.html
 /tests/smoke-input.md
 /.omc/
+/tests/fixtures/merge/build/
+/tests/probes/out/

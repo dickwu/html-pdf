@@ -3,12 +3,14 @@
 
 use std::{fs, path::PathBuf};
 
-use ext_php_rs::{binary::Binary, prelude::*};
+use ext_php_rs::{binary::Binary, class::RegisteredClass, prelude::*, zend::ce};
 use ironpress_core::{HtmlConverter as CoreHtmlConverter, Margin, PageSize};
 
 mod base14;
+mod merger;
 mod stamper;
 
+use merger::{EncryptedKind, InvalidKind, LimitKind, MergeError, Merger};
 use stamper::{Align, CheckOp, Stamper, TextOp};
 
 type PdfBinary = Binary<u8>;
@@ -461,6 +463,168 @@ fn page_number(page: i64) -> PhpResult<u32> {
         .ok_or_else(|| php_err(format!("page must be a positive integer, got {page}")))
 }
 
+/// Base class of every error `Ironpress\\PdfMerger` and `ironpress_pdf_merge()`
+/// throw. `getCode()` tells the cases apart (see the constants).
+#[php_class]
+#[php(name = "Ironpress\\PdfMergeException")]
+#[php(extends(ce = ce::exception, stub = "\\Exception"))]
+#[derive(Default)]
+pub struct PdfMergeException;
+
+#[php_impl]
+impl PdfMergeException {
+    /// The input is zero bytes long (or no PDFs were passed).
+    pub const EMPTY: i64 = 1;
+    /// The input has no `%PDF-` header.
+    pub const NOT_PDF: i64 = 2;
+    /// The input looks like a PDF but cannot be parsed.
+    pub const CORRUPT: i64 = 3;
+    /// The input parses but its page tree is empty.
+    pub const NO_PAGES: i64 = 4;
+    /// The input needs a password to open.
+    pub const PASSWORD_PROTECTED: i64 = 10;
+    /// The input opens without a password but has owner restrictions.
+    pub const OWNER_RESTRICTED: i64 = 11;
+    /// The input is larger than `maxInputBytes()`.
+    pub const INPUT_TOO_LARGE: i64 = 20;
+    /// The merged document would exceed `maxPages()`.
+    pub const TOO_MANY_PAGES: i64 = 21;
+}
+
+/// The input is empty, not a PDF, corrupt, or has no pages.
+#[php_class]
+#[php(name = "Ironpress\\InvalidPdfException")]
+#[php(extends(PdfMergeException))]
+#[derive(Default)]
+pub struct InvalidPdfException;
+
+/// The input is encrypted (password-protected or owner-restricted).
+#[php_class]
+#[php(name = "Ironpress\\EncryptedPdfException")]
+#[php(extends(PdfMergeException))]
+#[derive(Default)]
+pub struct EncryptedPdfException;
+
+/// The input or the merged document is over a configured limit.
+#[php_class]
+#[php(name = "Ironpress\\PdfLimitException")]
+#[php(extends(PdfMergeException))]
+#[derive(Default)]
+pub struct PdfLimitException;
+
+#[allow(clippy::needless_pass_by_value)]
+fn merge_err(err: MergeError) -> PhpException {
+    let (code, ce) = match &err {
+        MergeError::Invalid(kind, _) => (
+            match kind {
+                InvalidKind::Empty => PdfMergeException::EMPTY,
+                InvalidKind::NotPdf => PdfMergeException::NOT_PDF,
+                InvalidKind::Corrupt => PdfMergeException::CORRUPT,
+                InvalidKind::NoPages => PdfMergeException::NO_PAGES,
+            },
+            InvalidPdfException::get_metadata().ce(),
+        ),
+        MergeError::Encrypted(kind, _) => (
+            match kind {
+                EncryptedKind::Password => PdfMergeException::PASSWORD_PROTECTED,
+                EncryptedKind::OwnerRestricted => PdfMergeException::OWNER_RESTRICTED,
+            },
+            EncryptedPdfException::get_metadata().ce(),
+        ),
+        MergeError::Limit(kind, _) => (
+            match kind {
+                LimitKind::InputBytes => PdfMergeException::INPUT_TOO_LARGE,
+                LimitKind::Pages => PdfMergeException::TOO_MANY_PAGES,
+            },
+            PdfLimitException::get_metadata().ce(),
+        ),
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    PhpException::new(err.message().to_string(), code as i32, ce)
+}
+
+fn positive_limit(name: &str, value: i64) -> PhpResult<usize> {
+    usize::try_from(value)
+        .ok()
+        .filter(|&value| value >= 1)
+        .ok_or_else(|| php_err(format!("{name} must be a positive integer, got {value}")))
+}
+
+/// Append the pages of other PDFs to a PDF, exposed as `Ironpress\\PdfMerger`.
+/// Each copied page keeps its size, rotation, fonts and images; outlines,
+/// form fields and other document-level structures of appended PDFs are
+/// dropped. A rejected input throws a `PdfMergeException` subclass and leaves
+/// the merger unchanged.
+#[php_class]
+#[php(name = "Ironpress\\PdfMerger")]
+pub struct PdfMerger {
+    inner: Merger,
+}
+
+#[php_impl]
+impl PdfMerger {
+    /// Start from `pdf` (e.g. the output of `HtmlConverter::convert()`); its
+    /// pages come first.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn __construct(pdf: Binary<u8>) -> PhpResult<Self> {
+        Merger::new(&pdf)
+            .map(|inner| Self { inner })
+            .map_err(merge_err)
+    }
+
+    /// Append every page of `pdf`; returns the number of pages added.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn append(&mut self, pdf: Binary<u8>) -> PhpResult<i64> {
+        self.inner
+            .append(&pdf)
+            .map(|added| i64::try_from(added).unwrap_or(i64::MAX))
+            .map_err(merge_err)
+    }
+
+    /// Pages in the merged document so far.
+    pub fn page_count(&self) -> i64 {
+        i64::try_from(self.inner.page_count()).unwrap_or(i64::MAX)
+    }
+
+    /// Reject inputs larger than `bytes` (default 128 MiB).
+    pub fn max_input_bytes(&mut self, bytes: i64) -> PhpResult<()> {
+        self.inner
+            .set_max_input_bytes(positive_limit("maxInputBytes", bytes)?);
+        Ok(())
+    }
+
+    /// Reject an append that would make the document longer than `pages`
+    /// pages (default 5000).
+    pub fn max_pages(&mut self, pages: i64) -> PhpResult<()> {
+        self.inner.set_max_pages(positive_limit("maxPages", pages)?);
+        Ok(())
+    }
+
+    /// Accept PDFs that open without a password but carry owner restrictions
+    /// (off by default). Their pages are copied unencrypted, so the
+    /// restrictions do not carry over.
+    pub fn allow_owner_restricted(&mut self, enabled: bool) {
+        self.inner.set_allow_owner_restricted(enabled);
+    }
+
+    /// The merged PDF. More PDFs can still be appended afterwards.
+    pub fn to_pdf(&self) -> PhpResult<PdfBinary> {
+        self.inner.to_pdf().map(pdf_to_php_bytes).map_err(php_err)
+    }
+}
+
+/// Merge PDFs in order into one PDF. Throws a `PdfMergeException` subclass
+/// naming the failing index (`PDF #n: ...`).
+#[php_function]
+#[php(name = "ironpress_pdf_merge")]
+#[allow(clippy::needless_pass_by_value)]
+pub fn pdf_merge(pdfs: Vec<Binary<u8>>) -> PhpResult<PdfBinary> {
+    let slices: Vec<&[u8]> = pdfs.iter().map(|pdf| &pdf[..]).collect();
+    merger::merge_all(&slices)
+        .map(pdf_to_php_bytes)
+        .map_err(merge_err)
+}
+
 #[php_module]
 pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
     module
@@ -472,6 +636,12 @@ pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
         .function(wrap_function!(convert_file))
         .function(wrap_function!(convert_markdown_file))
         .function(wrap_function!(version))
+        .function(wrap_function!(pdf_merge))
         .class::<HtmlConverter>()
         .class::<PdfStamper>()
+        .class::<PdfMergeException>()
+        .class::<InvalidPdfException>()
+        .class::<EncryptedPdfException>()
+        .class::<PdfLimitException>()
+        .class::<PdfMerger>()
 }
