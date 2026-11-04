@@ -892,7 +892,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> Vec<u8> {
-        ironpress_core::html_to_pdf("<h1>Fixture</h1><p>One page.</p>").expect("fixture PDF")
+        ironpages::html_to_pdf("<h1>Fixture</h1><p>One page.</p>").expect("fixture PDF")
     }
 
     fn text_op(page: u32, text: &str) -> TextOp {

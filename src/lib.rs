@@ -4,7 +4,7 @@
 use std::{fs, path::PathBuf};
 
 use ext_php_rs::{binary::Binary, class::RegisteredClass, prelude::*, zend::ce};
-use ironpress_core::{HtmlConverter as CoreHtmlConverter, Margin, PageSize};
+use ironpages::{HtmlConverter as CoreHtmlConverter, Margin, PageSize};
 
 mod base14;
 mod merger;
@@ -28,7 +28,7 @@ fn php_err(message: impl Into<String>) -> PhpException {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn map_ironpress_err(err: ironpress_core::IronpressError) -> PhpException {
+fn map_ironpress_err(err: ironpages::IronpagesError) -> PhpException {
     php_err(err.to_string())
 }
 

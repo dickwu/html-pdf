@@ -15,13 +15,15 @@ ext-php-rs = "=0.16.3"
 lopdf = "0.45"
 # Metrics of fonts added to PdfStamper (already in the tree through the engine).
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
-# Ironpress core (HTML/CSS/Markdown -> PDF engine). Cargo.lock pins the exact
-# commit for reproducible prod builds.
-ironpress_core = { package = "ironpress", git = "https://github.com/dickwu/ironpress.git", branch = "fix/meal-plan-overflow-1.7", default-features = false }
+# ironpages engine (HTML/CSS/Markdown -> PDF), the renamed fork of ironpress
+# 1.7.0. Local path dependency until github.com/dickwu/ironpages is published;
+# then switch to a pinned git dependency so CI and release builds can fetch it:
+#   ironpages = { git = "https://github.com/dickwu/ironpages", rev = "<commit>", default-features = false }
+ironpages = { path = "../ironpages", default-features = false }
 
 [features]
 default = []
-remote = ["ironpress_core/remote"]
+remote = ["ironpages/remote"]
 
 [profile.release]
 strip = "debuginfo"
