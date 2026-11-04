@@ -677,7 +677,14 @@ fn push_check(content: &mut Content, x: f64, y_top_pdf: f64, size: f64, stroke: 
 #[allow(clippy::cast_possible_truncation)]
 fn real(value: f64) -> Object {
     // Keep the content stream tidy: 3 decimals is well below 1/100 of a point.
-    Object::Real(((value * 1000.0).round() / 1000.0) as f32)
+    let rounded = (value * 1000.0).round() / 1000.0;
+    // lopdf 0.47 writes integral reals as `9.0`; emit whole numbers as integers
+    // so the stream stays byte-for-byte what earlier releases produced.
+    if rounded.fract() == 0.0 && rounded.abs() < f64::from(i32::MAX) {
+        Object::Integer(rounded as i64)
+    } else {
+        Object::Real(rounded as f32)
+    }
 }
 
 /// Advance width in points of WinAnsi-encoded bytes at `size`, from a font's

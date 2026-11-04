@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7.0.1
 
       - name: Run Homebrew formula generator tests
         run: ruby tests/homebrew_formula_test.rb
@@ -108,9 +108,9 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            RUSTFLAGS="-C link-arg=-Wl,-undefined,dynamic_lookup" cargo install cargo-php --version 0.2.1 --locked
+            RUSTFLAGS="-C link-arg=-Wl,-undefined,dynamic_lookup" cargo install cargo-php --version 0.2.2 --locked
           else
-            cargo install cargo-php --version 0.2.1 --locked
+            cargo install cargo-php --version 0.2.2 --locked
           fi
           # Linux links cdylibs with BIND_NOW, so every undefined symbol must
           # resolve when cargo-php dlopen()s the debug build. ext-php-rs's wrapper.c
