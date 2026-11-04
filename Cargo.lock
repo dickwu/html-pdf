@@ -1224,6 +1224,7 @@ dependencies = [
 [[package]]
 name = "ironpages"
 version = "2.0.0"
+source = "git+https://github.com/dickwu/ironpages?rev=1474f54865172d289752bfc8df5426306fb28ec7#1474f54865172d289752bfc8df5426306fb28ec7"
 dependencies = [
  "bogon",
  "core-net",

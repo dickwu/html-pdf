@@ -16,10 +16,8 @@ lopdf = "0.45"
 # Metrics of fonts added to PdfStamper (already in the tree through the engine).
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 # ironpages engine (HTML/CSS/Markdown -> PDF), the renamed fork of ironpress
-# 1.7.0. Local path dependency until github.com/dickwu/ironpages is published;
-# then switch to a pinned git dependency so CI and release builds can fetch it:
-#   ironpages = { git = "https://github.com/dickwu/ironpages", rev = "<commit>", default-features = false }
-ironpages = { path = "../ironpages", default-features = false }
+# 1.7.0, pinned to a commit on github.com/dickwu/ironpages.
+ironpages = { git = "https://github.com/dickwu/ironpages", rev = "1474f54865172d289752bfc8df5426306fb28ec7", default-features = false }
 
 [features]
 default = []
