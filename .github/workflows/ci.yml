@@ -102,6 +102,7 @@ jobs:
           php -n -d extension="$ext" tests/options.php
           php -n -d extension="$ext" tests/stamper.php
           php -n -d extension="$ext" tests/merge.php
+          php -n -d extension="$ext" tests/fonts-viewer.php
 
       - name: Verify generated PHP stubs
         shell: bash

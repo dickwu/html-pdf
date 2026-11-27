@@ -17,11 +17,19 @@ namespace Ironpress {
         public function __construct() {}
 
         /**
+         * Register a TrueType font (the bytes of a .ttf file) for CSS
+         * `font-family: <name>`. Register a family's bold and italic faces under
+         * the same name with `weight` (CSS 100..=900; 600 and above is bold) and
+         * `style` (`normal`, `italic` or `oblique`); a face that is not
+         * registered is synthesized from the regular one.
+         *
          * @param string $name
          * @param string $ttf_data
+         * @param int|null $weight
+         * @param string|null $style
          * @return void
          */
-        public function addFont(string $name, string $ttf_data): void {}
+        public function addFont(string $name, string $ttf_data, ?int $weight = null, ?string $style = null): void {}
 
         /**
          * @param string|null $path
@@ -54,16 +62,43 @@ namespace Ironpress {
         public function customPageSize(float $width, float $height): void {}
 
         /**
+         * Plain-text running footer on every page (`{page}` and `{pages}` are
+         * substituted). Replaces a `footerHtml()` footer; `null` removes it.
+         *
          * @param string|null $text
          * @return void
          */
         public function footer(?string $text = null): void {}
 
         /**
+         * HTML running footer rendered in the bottom margin of every page, with
+         * the document's fonts, CSS, sanitizer and `basePath()`. Reserve enough
+         * bottom margin for it. Replaces a `footer()` text footer; `null` removes
+         * it.
+         *
+         * @param string|null $html
+         * @return void
+         */
+        public function footerHtml(?string $html = null): void {}
+
+        /**
+         * Plain-text running header on every page (`{page}` and `{pages}` are
+         * substituted). Replaces a `headerHtml()` header; `null` removes it.
+         *
          * @param string|null $text
          * @return void
          */
         public function header(?string $text = null): void {}
+
+        /**
+         * HTML running header rendered in the top margin of every page, with the
+         * document's fonts, CSS, sanitizer and `basePath()`. Reserve enough top
+         * margin for it. Replaces a `header()` text header; `null` removes it.
+         *
+         * @param string|null $html
+         * @return void
+         */
+        public function headerHtml(?string $html = null): void {}
 
         /**
          * @param bool $enabled
@@ -118,10 +153,53 @@ namespace Ironpress {
         public function measureSentinelTops(string $html, float $sentinel_height, string $sentinel_color): array {}
 
         /**
+         * What `registeredFontsOnly(true)` does with a character no allowed font
+         * covers: `blank` (default) leaves it blank, `error` makes `convert()`
+         * throw, listing every such character.
+         *
+         * @param string $policy
+         * @return void
+         */
+        public function missingGlyphs(string $policy): void {}
+
+        /**
+         * Zoom a PDF viewer applies to the first page when the document opens:
+         * `fit-page`, `fit-width`, `fit-height`, `real` (100%), or a percentage
+         * such as `'150'` or `'75%'`. `null` leaves it to the viewer.
+         *
+         * @param string|null $zoom
+         * @return void
+         */
+        public function openZoom(?string $zoom = null): void {}
+
+        /**
+         * Page arrangement a PDF viewer uses when the document opens:
+         * `single-page`, `one-column`, `two-column-left`, `two-column-right`,
+         * `two-page-left` or `two-page-right`. `null` leaves it to the viewer.
+         *
+         * @param string|null $layout
+         * @return void
+         */
+        public function pageLayout(?string $layout = null): void {}
+
+        /**
          * @param string $name
          * @return void
          */
         public function pageSize(string $name): void {}
+
+        /**
+         * Draw only with fonts added through `addFont()` (or `@font-face` with a
+         * `url()` source), never with fonts installed on the host. Unregistered
+         * standard names (Helvetica, Arial, Times, Courier, serif, sans-serif,
+         * monospace) use the PDF built-in Base-14 fonts, and characters no
+         * allowed font covers follow `missingGlyphs()` (blank by default). Off by
+         * default.
+         *
+         * @param bool $enabled
+         * @return void
+         */
+        public function registeredFontsOnly(bool $enabled): void {}
 
         /**
          * @param bool $enabled

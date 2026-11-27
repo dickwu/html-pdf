@@ -1,6 +1,6 @@
 [package]
 name = "ironpress-php"
-version = "0.4.4"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -17,7 +17,7 @@ lopdf = "0.47"
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 # ironpages engine (HTML/CSS/Markdown -> PDF), the renamed fork of ironpress
 # 1.7.0, from crates.io.
-ironpages = { version = "2.0", default-features = false }
+ironpages = { version = "2.1", default-features = false }
 
 [features]
 default = []

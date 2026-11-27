@@ -4,7 +4,10 @@
 use std::{fs, path::PathBuf};
 
 use ext_php_rs::{binary::Binary, class::RegisteredClass, prelude::*, zend::ce};
-use ironpages::{HtmlConverter as CoreHtmlConverter, Margin, PageSize};
+use ironpages::{
+    FontFaceStyle, FontFallback, HtmlConverter as CoreHtmlConverter, Margin, MissingGlyphs,
+    OpenZoom, PageLayout, PageSize, ViewerPreferences,
+};
 
 mod base14;
 mod merger;
@@ -78,6 +81,104 @@ fn page_size_by_name(name: &str) -> PhpResult<PageSize> {
             "Unknown page size '{other}'. Expected one of: a4, letter, legal"
         ))),
     }
+}
+
+/// `weight` (CSS 100..=900) and `style` (`normal` / `italic` / `oblique`) of
+/// an `addFont()` face. Both default to the regular face.
+fn font_face_style(weight: Option<i64>, style: Option<&str>) -> PhpResult<FontFaceStyle> {
+    let weight = match weight {
+        None => 400,
+        Some(weight @ 1..=1000) => u16::try_from(weight).unwrap_or(400),
+        Some(other) => {
+            return Err(php_err(format!(
+                "font weight must be between 1 and 1000 (400 regular, 700 bold), got {other}"
+            )));
+        }
+    };
+    let italic = match style.map(|style| style.trim().to_ascii_lowercase()) {
+        None => false,
+        Some(style) => match style.as_str() {
+            "" | "normal" | "regular" => false,
+            "italic" | "oblique" => true,
+            other => {
+                return Err(php_err(format!(
+                    "Unknown font style '{other}'. Expected one of: normal, italic, oblique"
+                )));
+            }
+        },
+    };
+    Ok(FontFaceStyle::from_css_weight(weight, italic))
+}
+
+fn missing_glyphs_by_name(name: &str) -> PhpResult<MissingGlyphs> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "blank" => Ok(MissingGlyphs::Blank),
+        "error" | "throw" => Ok(MissingGlyphs::Error),
+        other => Err(php_err(format!(
+            "Unknown missing-glyph policy '{other}'. Expected one of: blank, error"
+        ))),
+    }
+}
+
+fn page_layout_by_name(name: &str) -> PhpResult<PageLayout> {
+    let key: String = name
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| !matches!(ch, '-' | '_' | ' '))
+        .collect();
+    match key.as_str() {
+        "singlepage" | "single" => Ok(PageLayout::SinglePage),
+        "onecolumn" | "continuous" => Ok(PageLayout::OneColumn),
+        "twocolumnleft" => Ok(PageLayout::TwoColumnLeft),
+        "twocolumnright" => Ok(PageLayout::TwoColumnRight),
+        "twopageleft" => Ok(PageLayout::TwoPageLeft),
+        "twopageright" => Ok(PageLayout::TwoPageRight),
+        _ => Err(php_err(format!(
+            "Unknown page layout '{}'. Expected one of: single-page, one-column, \
+             two-column-left, two-column-right, two-page-left, two-page-right",
+            name.trim()
+        ))),
+    }
+}
+
+fn open_zoom_by_name(name: &str) -> PhpResult<OpenZoom> {
+    let key = name.trim().to_ascii_lowercase();
+    match key.as_str() {
+        "fit-page" | "fitpage" | "fit" | "fullpage" => return Ok(OpenZoom::FitPage),
+        "fit-width" | "fitwidth" | "fullwidth" => return Ok(OpenZoom::FitWidth),
+        "fit-height" | "fitheight" => return Ok(OpenZoom::FitHeight),
+        "real" | "actual" | "actual-size" => return Ok(OpenZoom::Percent(100.0)),
+        _ => {}
+    }
+    key.trim_end_matches('%')
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|percent| percent.is_finite() && (1.0..=6400.0).contains(percent))
+        .map(OpenZoom::Percent)
+        .ok_or_else(|| {
+            php_err(format!(
+                "Unknown open zoom '{}'. Expected fit-page, fit-width, fit-height, real, \
+                 or a percentage between 1 and 6400 such as '150' or '75%'",
+                name.trim()
+            ))
+        })
+}
+
+/// Text or HTML content of a running header or footer.
+#[derive(Debug, Clone)]
+enum MarginContent {
+    Text(String),
+    Html(String),
+}
+
+/// One font face registered with `addFont()`.
+#[derive(Debug, Clone)]
+struct RegisteredFont {
+    name: String,
+    style: FontFaceStyle,
+    bytes: Vec<u8>,
 }
 
 /// The converter behind the `ironpress_*` functions: default settings plus
@@ -163,11 +264,14 @@ pub struct HtmlConverter {
     margin: Margin,
     sanitize: bool,
     landscape: bool,
-    header: Option<String>,
-    footer: Option<String>,
+    header: Option<MarginContent>,
+    footer: Option<MarginContent>,
     base_path: Option<PathBuf>,
-    fonts: Vec<(String, Vec<u8>)>,
+    fonts: Vec<RegisteredFont>,
     legacy_table_cell_metrics: bool,
+    font_fallback: FontFallback,
+    missing_glyphs: MissingGlyphs,
+    viewer: ViewerPreferences,
 }
 
 #[php_impl]
@@ -183,6 +287,9 @@ impl HtmlConverter {
             base_path: None,
             fonts: Vec::new(),
             legacy_table_cell_metrics: LEGACY_TABLE_CELL_METRICS_DEFAULT,
+            font_fallback: FontFallback::System,
+            missing_glyphs: MissingGlyphs::Blank,
+            viewer: ViewerPreferences::default(),
         }
     }
 
@@ -222,19 +329,50 @@ impl HtmlConverter {
         self.sanitize = enabled;
     }
 
+    /// Plain-text running header on every page (`{page}` and `{pages}` are
+    /// substituted). Replaces a `headerHtml()` header; `null` removes it.
     pub fn header(&mut self, text: Option<String>) {
-        self.header = text;
+        self.header = text.map(MarginContent::Text);
     }
 
+    /// Plain-text running footer on every page (`{page}` and `{pages}` are
+    /// substituted). Replaces a `footerHtml()` footer; `null` removes it.
     pub fn footer(&mut self, text: Option<String>) {
-        self.footer = text;
+        self.footer = text.map(MarginContent::Text);
+    }
+
+    /// HTML running header rendered in the top margin of every page, with the
+    /// document's fonts, CSS, sanitizer and `basePath()`. Reserve enough top
+    /// margin for it. Replaces a `header()` text header; `null` removes it.
+    pub fn header_html(&mut self, html: Option<String>) {
+        self.header = html.map(MarginContent::Html);
+    }
+
+    /// HTML running footer rendered in the bottom margin of every page, with
+    /// the document's fonts, CSS, sanitizer and `basePath()`. Reserve enough
+    /// bottom margin for it. Replaces a `footer()` text footer; `null` removes
+    /// it.
+    pub fn footer_html(&mut self, html: Option<String>) {
+        self.footer = html.map(MarginContent::Html);
     }
 
     pub fn base_path(&mut self, path: Option<String>) {
         self.base_path = path.map(PathBuf::from);
     }
 
-    pub fn add_font(&mut self, name: &str, ttf_data: Binary<u8>) -> PhpResult<()> {
+    /// Register a TrueType font (the bytes of a .ttf file) for CSS
+    /// `font-family: <name>`. Register a family's bold and italic faces under
+    /// the same name with `weight` (CSS 100..=900; 600 and above is bold) and
+    /// `style` (`normal`, `italic` or `oblique`); a face that is not
+    /// registered is synthesized from the regular one.
+    pub fn add_font(
+        &mut self,
+        name: &str,
+        ttf_data: Binary<u8>,
+        weight: Option<i64>,
+        style: Option<&str>,
+    ) -> PhpResult<()> {
+        let style = font_face_style(weight, style)?;
         let bytes = Vec::from(ttf_data);
         if name.trim().is_empty() {
             return Err(php_err("font name must not be empty"));
@@ -246,7 +384,52 @@ impl HtmlConverter {
             return Err(php_err("font data exceeds 50 MB limit"));
         }
 
-        self.fonts.push((name.to_string(), bytes));
+        self.fonts.push(RegisteredFont {
+            name: name.to_string(),
+            style,
+            bytes,
+        });
+        Ok(())
+    }
+
+    /// Draw only with fonts added through `addFont()` (or `@font-face` with a
+    /// `url()` source), never with fonts installed on the host. Unregistered
+    /// standard names (Helvetica, Arial, Times, Courier, serif, sans-serif,
+    /// monospace) use the PDF built-in Base-14 fonts, and characters no
+    /// allowed font covers follow `missingGlyphs()` (blank by default). Off by
+    /// default.
+    pub fn registered_fonts_only(&mut self, enabled: bool) {
+        self.font_fallback = if enabled {
+            FontFallback::RegisteredOnly(self.missing_glyphs)
+        } else {
+            FontFallback::System
+        };
+    }
+
+    /// What `registeredFontsOnly(true)` does with a character no allowed font
+    /// covers: `blank` (default) leaves it blank, `error` makes `convert()`
+    /// throw, listing every such character.
+    pub fn missing_glyphs(&mut self, policy: &str) -> PhpResult<()> {
+        self.missing_glyphs = missing_glyphs_by_name(policy)?;
+        if let FontFallback::RegisteredOnly(_) = self.font_fallback {
+            self.font_fallback = FontFallback::RegisteredOnly(self.missing_glyphs);
+        }
+        Ok(())
+    }
+
+    /// Page arrangement a PDF viewer uses when the document opens:
+    /// `single-page`, `one-column`, `two-column-left`, `two-column-right`,
+    /// `two-page-left` or `two-page-right`. `null` leaves it to the viewer.
+    pub fn page_layout(&mut self, layout: Option<&str>) -> PhpResult<()> {
+        self.viewer.page_layout = layout.map(page_layout_by_name).transpose()?;
+        Ok(())
+    }
+
+    /// Zoom a PDF viewer applies to the first page when the document opens:
+    /// `fit-page`, `fit-width`, `fit-height`, `real` (100%), or a percentage
+    /// such as `'150'` or `'75%'`. `null` leaves it to the viewer.
+    pub fn open_zoom(&mut self, zoom: Option<&str>) -> PhpResult<()> {
+        self.viewer.open_zoom = zoom.map(open_zoom_by_name).transpose()?;
         Ok(())
     }
 
@@ -317,19 +500,25 @@ impl HtmlConverter {
             .page_size(self.effective_page_size())
             .margin(self.margin)
             .sanitize(self.sanitize)
-            .legacy_table_cell_metrics(self.legacy_table_cell_metrics);
+            .legacy_table_cell_metrics(self.legacy_table_cell_metrics)
+            .font_fallback(self.font_fallback)
+            .viewer_preferences(self.viewer);
 
-        if let Some(header) = &self.header {
-            converter = converter.header(header.clone());
-        }
-        if let Some(footer) = &self.footer {
-            converter = converter.footer(footer.clone());
-        }
+        converter = match &self.header {
+            Some(MarginContent::Text(text)) => converter.header(text.clone()),
+            Some(MarginContent::Html(html)) => converter.header_html(html.clone()),
+            None => converter,
+        };
+        converter = match &self.footer {
+            Some(MarginContent::Text(text)) => converter.footer(text.clone()),
+            Some(MarginContent::Html(html)) => converter.footer_html(html.clone()),
+            None => converter,
+        };
         if let Some(base_path) = &self.base_path {
             converter = converter.base_path(base_path.as_path());
         }
-        for (name, bytes) in &self.fonts {
-            converter = converter.add_font(name, bytes.clone());
+        for font in &self.fonts {
+            converter = converter.add_font_variant(&font.name, font.style, font.bytes.clone());
         }
 
         converter
