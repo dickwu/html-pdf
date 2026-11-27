@@ -1246,9 +1246,9 @@ dependencies = [
 
 [[package]]
 name = "ironpages"
-version = "2.1.1"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "609598a7b2385fa5cb7ae30981d97eb339362d0254998005530d859ec23808d0"
+checksum = "477980cf5c251d974df5a9d6f434f4e77b29b7f456c12bed1e59164977eb4252"
 dependencies = [
  "bogon",
  "core-net",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "ironpress-php"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "ext-php-rs",
  "ironpages",
