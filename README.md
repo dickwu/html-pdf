@@ -71,7 +71,7 @@ brew install dickwu/tap/html-pdf
 php -m | grep ironpress_php
 ```
 
-The Homebrew formula detects installed Homebrew PHP formulae at install or upgrade time, builds a matching extension for each PHP minor version, and writes:
+The Homebrew formula detects installed Homebrew PHP formulae at install or upgrade time, builds a matching extension for each supported PHP minor version (PHP 8.0 through 8.5; newer installed versions such as 8.6 are skipped with a warning until the extension supports them), and writes:
 
 ```text
 $(brew --prefix)/etc/php/<php-minor>/conf.d/ext-ironpress_php.ini

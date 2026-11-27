@@ -18,6 +18,12 @@ class HtmlPdf < Formula
   depends_on "rust" => :build
   depends_on "php"
 
+  # The extension is built with ext-php-rs, which supports PHP 8.0 through 8.5.
+  # A newer Homebrew PHP (for example 8.6) is skipped instead of failing the
+  # whole install. Raise MAX_SUPPORTED_PHP when ext-php-rs gains support.
+  MIN_SUPPORTED_PHP = Version.new("8.0").freeze
+  MAX_SUPPORTED_PHP = Version.new("8.5").freeze
+
   def self.installed_homebrew_php_formulae
     php = Formula["php"]
     ([php] + php.versioned_formulae)
@@ -25,12 +31,34 @@ class HtmlPdf < Formula
       .uniq { |formula| formula.opt_bin.to_s }
   end
 
+  def self.supported_php?(php)
+    php.version.major_minor.between?(MIN_SUPPORTED_PHP, MAX_SUPPORTED_PHP)
+  end
+
+  def self.supported_php_formulae
+    installed_homebrew_php_formulae.select { |php| supported_php?(php) }
+  end
+
+  def self.unsupported_php_formulae
+    installed_homebrew_php_formulae.reject { |php| supported_php?(php) }
+  end
+
   def install
     ENV["LIBCLANG_PATH"] = Formula["llvm"].opt_lib.to_s
 
     extension = OS.mac? ? "dylib" : "so"
 
-    self.class.installed_homebrew_php_formulae.each do |php|
+    supported_range = "PHP #{MIN_SUPPORTED_PHP} through #{MAX_SUPPORTED_PHP}"
+
+    self.class.unsupported_php_formulae.each do |php|
+      opoo "Skipping #{php.full_name}: the extension supports #{supported_range}"
+    end
+
+    if self.class.supported_php_formulae.empty?
+      odie "No supported Homebrew PHP is installed (#{supported_range}). Install php@#{MAX_SUPPORTED_PHP}."
+    end
+
+    self.class.supported_php_formulae.each do |php|
       php_version = php.version.major_minor.to_s
       target_dir = buildpath/"target/homebrew-php-#{php_version}"
 
@@ -59,21 +87,23 @@ class HtmlPdf < Formula
   end
 
   def caveats
-    config_paths = self.class.installed_homebrew_php_formulae
+    config_paths = self.class.supported_php_formulae
       .map { |php| "        #{etc}/php/#{php.version.major_minor}/conf.d/ext-ironpress_php.ini" }
       .join("\n")
 
     <<~EOS
-      The formula writes one ini file for each installed Homebrew PHP:
+      The formula writes one ini file for each installed Homebrew PHP that the
+      extension supports (PHP #{MIN_SUPPORTED_PHP} through #{MAX_SUPPORTED_PHP}):
 #{config_paths}
 
+      Other installed Homebrew PHP versions are skipped.
       Reinstall html-pdf after installing another Homebrew PHP version.
       Restart long-running PHP processes after install or upgrade.
     EOS
   end
 
   test do
-    self.class.installed_homebrew_php_formulae.each do |php|
+    self.class.supported_php_formulae.each do |php|
       php_version = php.version.major_minor.to_s
       output = testpath/"homebrew-#{php_version}.pdf"
       script = <<~PHP
